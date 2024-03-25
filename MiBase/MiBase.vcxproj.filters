@@ -1,0 +1,114 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="资源文件">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="include">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\MiUtil.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiBuffer.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiString.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiMath.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiTime.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiVector.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiLog.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiSocket.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiThread.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiEndian.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiTimer.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiHeapTimer.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiObject.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiRbtree.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiLock.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\MiFile.h">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\MiBuffer.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiString.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiMath.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiTime.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiVector.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiLog.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiSocket.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiSocketIP.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiThread.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiEndian.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiTimer.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiHeapTimer.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiRbtree.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiLock.c">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\MiFile.c">
+      <Filter>src</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
