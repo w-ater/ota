@@ -11,12 +11,12 @@
 #include <pthread.h>
 #include <sys/time.h>
  
-#define WS_DEBUG //开启debug打印
-#ifdef WS_DEBUG
-#define WS_INFO(...) fprintf(stdout, "[WS_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stdout, __VA_ARGS__)
+#define OTA_DEBUG //开启debug打印
+#ifdef OTA_DEBUG
+#define OTA_INFO(...) fprintf(stdout, "[OTA_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stdout, __VA_ARGS__)
 #define OTA_ERR(...) fprintf(stderr, "[OTA_ERR] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
 #else
-#define WS_INFO(...)
+#define OTA_INFO(...)
 #define OTA_ERR(...) 
 #endif
 
@@ -260,21 +260,13 @@ void * download(void * socket_d)
     int mem_size = 4096;//mem_size might be enlarge, so reset it
     int buf_len = mem_size;//read 4k each time
     int len;
- 
-    //创建文件描述符
-    int fd = open("upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
-    if (fd < 0)
-    {
-        OTA_ERR("Create file failed\n");
-        exit(0);
-    }
 
     char *buf = (char *) malloc(mem_size * sizeof(char));
 	char ver_str[64]={0};
 	char tmpVer[64]={0};
 
-	char ota_str[64];
-	char md5_get[32];
+	char ota_str[64]={0};
+	char md5_get[32]={0};
 
 	if ((read(client_socket, buf, 64)) != 0)
 	{
@@ -297,9 +289,9 @@ void * download(void * socket_d)
 				}else{
 					OTA_ERR("当前版本已是最新\n");
 					free(buf);
-					close(fd);
 					OTA_ERR("!!!reboot\n");
-					system("reboot");
+					system("reboot");					
+					pthread_exit(NULL);
 				}
 			}
 
@@ -316,9 +308,17 @@ void * download(void * socket_d)
         //write(fd, buf, len);
         //progressBar(length, resp.content_length);
     }
-	memset(buf,0,sizeof(buf));
+	memset(buf,0,4096);
 	OTA_ERR("!!!sizeof(buf)%d\n",mem_size * sizeof(char));
 	resp.content_length -= 64;
+
+	//创建文件描述符
+    int fd = open("upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
+    if (fd < 0)
+    {
+        OTA_ERR("Create file failed\n");
+		pthread_exit(NULL);
+    }
     //从套接字中读取文件流
     while ((len = read(client_socket, buf, buf_len)) != 0 && length < resp.content_length)
 	{
@@ -331,7 +331,8 @@ void * download(void * socket_d)
 		//OTA_ERR("!!!len%d\n",len);
         write(fd, buf, len);
         length += len;
-        //progressBar(length, resp.content_length);
+		memset(buf,0,4096);
+        progressBar(length, resp.content_length);
     }
  
     if (length == resp.content_length)
@@ -372,7 +373,7 @@ void * download(void * socket_d)
 	system("lzma -d upgrade.tar.lzma");
 	system("./busybox tar xvf upgrade.tar");
 	
-	char file_path[64];
+	char file_path[64]={0,0,0,0};
 	readStringValue("file", "extest", file_path, "./ota.ini");
 	OTA_ERR("!!!file_path%s\n",file_path);
 	
@@ -380,10 +381,12 @@ void * download(void * socket_d)
     //char file_path[] = "/path/to/destination/file";
 
     char command[100];
+	memset(command,0,100);
 
     sprintf(command, "cp %s %s", extest, file_path);
     system(command);
 
+	memset(file_path,0,64);
 	readStringValue("file", "111", file_path, "./ota.ini");
 		OTA_ERR("!!!file_path%s\n",file_path);
 
@@ -779,6 +782,8 @@ int main(int argc, char const *argv[])
     int len;
     char *buf = (char *) malloc(mem_size * sizeof(char));
     char *response = (char *) malloc(mem_size * sizeof(char));
+	memset(response,0,4096);	
+	memset(buf,0,4096);
  
     //每次单个字符读取响应头信息, 仅仅读取的是响应部分的头部, 后面单独开线程下载
     while ((len = read(client_socket, buf, 1)) != 0)
@@ -817,5 +822,7 @@ int main(int argc, char const *argv[])
     pthread_t download_thread;
     pthread_create(&download_thread, NULL, download, (void *) &client_socket);
     pthread_join(download_thread, NULL);
-    return 0;
+
+	free(response);
+    free(buf);
 }
