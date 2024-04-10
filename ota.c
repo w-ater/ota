@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <pthread.h>
 #include <sys/time.h>
- 
+/* 
 #define OTA_DEBUG //开启debug打印
 #ifdef OTA_DEBUG
 #define OTA_INFO(...) fprintf(stdout, "[OTA_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stdout, __VA_ARGS__)
@@ -18,6 +18,24 @@
 #else
 #define OTA_INFO(...)
 #define OTA_ERR(...) 
+#endif
+*/
+#define NONE_LEVEL 0
+#define INFO_LEVEL 1
+#define ERR_LEVEL  2
+	
+	
+#define LOG_LEVEL 1//打印级别控制的宏定义
+	
+#if(LOG_LEVEL == NONE_LEVEL)
+#define OTA_INFO(...)
+#define OTA_ERR(...) 
+#elif(LOG_LEVEL == INFO_LEVEL)
+#define OTA_INFO(...) fprintf(stdout, "[WS_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stdout, __VA_ARGS__)
+#define OTA_ERR(...) fprintf(stderr, "[WS_ERR] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
+#elif(LOG_LEVEL == ERR_LEVEL)
+#define OTA_INFO(...) 
+#define OTA_ERR(...) fprintf(stderr, "[WS_ERR] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
 #endif
 
 struct resp_header//保持相应头信息
@@ -27,7 +45,7 @@ struct resp_header//保持相应头信息
     long content_length;//Content-Length: 11683079
     char file_name[256];
 };
- 
+
 struct resp_header resp;//全剧变量以便在多个进程中使用
  
 void parse_url(const char *url, char *domain, int *port, char *file_name)
@@ -135,11 +153,11 @@ void progressBar(long cur_size, long total_size)
     memset(sign, '=', numTotal);
  
  
-    OTA_ERR("\r%.2f%%\t[%-*.*s] %.2f/%.2fMB", percent * 100, numTotal, numShow, sign, cur_size / 1024.0 / 1024.0, total_size / 1024.0 / 1024.0);
+    OTA_INFO("\r%.2f%%\t[%-*.*s] %.2f/%.2fMB", percent * 100, numTotal, numShow, sign, cur_size / 1024.0 / 1024.0, total_size / 1024.0 / 1024.0);
     fflush(stdout);
  
     if (numShow == numTotal)
-        OTA_ERR("\n");
+        OTA_INFO("\n");
 }
 #if 0
 void * download(void * socket_d)
@@ -155,7 +173,7 @@ void * download(void * socket_d)
     int fd = open(resp.file_name, O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
     if (fd < 0)
     {
-        OTA_ERR("Create file failed\n");
+        OTA_INFO("Create file failed\n");
         exit(0);
     }
  
@@ -170,7 +188,7 @@ void * download(void * socket_d)
     }
  
     if (length == resp.content_length)
-        OTA_ERR("Download successful ^_^\n\n");
+        OTA_INFO("Download successful ^_^\n\n");
 }
 #endif
 #include "md5.h"
@@ -230,14 +248,32 @@ int Compute_file_md5(const char *file_path, char *md5_str)
 
 int  GetDevVer(char* ver_out)
 {
-	readStringValue("ipc", "ver", ver_out, CFGINI);
+	int ret = readStringValue("ipc", "ver", ver_out, CFGINI);
+	if (ret == 1)
+	{
+	    // 读取配置值成功
+	}
+	else
+	{
+	    OTA_ERR("Error reading configuration value\n");
+	    // 可以根据具体情况采取适当的处理措施
+	}
 }
 //#define CFGINI2  "/media/mmcblk0/ota"
 #define CFGINI2  "/tmp/ota.ini"
 
 int  GetOtaApp(char* ver_out)
 {
-	readStringValue("file", "extest", ver_out, CFGINI2);
+	int ret = readStringValue("file", "extest", ver_out, CFGINI2);
+	if (ret == 1)
+	{
+	    // 读取配置值成功
+	}
+	else
+	{
+	    OTA_ERR("Error reading configuration value\n");
+	    // 可以根据具体情况采取适当的处理措施
+	}
 }
 
 int  SetDevVer(const char* ver_in)
@@ -260,56 +296,70 @@ void * download(void * socket_d)
     int mem_size = 4096;//mem_size might be enlarge, so reset it
     int buf_len = mem_size;//read 4k each time
     int len;
-
-    char *buf = (char *) malloc(mem_size * sizeof(char));
 	char ver_str[64]={0};
 	char tmpVer[64]={0};
 
 	char ota_str[64]={0};
 	char md5_get[32]={0};
 
-	if ((read(client_socket, buf, 64)) != 0)
+    char *buf = (char *) malloc(mem_size * sizeof(char));
+	if (buf != NULL)
 	{
-			memcpy(ota_str,buf,64);
-			ota_str[63]='\0';
-			OTA_ERR("!!!ota_str%s\n",ota_str);
-			
-			memcpy(ver_str,ota_str+3,7);
-			OTA_ERR("ver_str is %s\n",ver_str);
-			
-			GetDevVer(tmpVer);
-			OTA_ERR("tmpVer is %s\n",tmpVer);
-			
-			if (compare_versions(tmpVer, ver_str)) {
-				OTA_ERR("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
+	    // 内存分配成功
+	}
+	else
+	{
+	    OTA_ERR("Error allocating memory\n");
+	    pthread_exit(NULL);
+	}
 
-			} else {
-				if (strcmp(ver_str, "0.0.0.0") == 0){
-					OTA_ERR("版本%s 强制升级\n",ver_str);
-				}else{
-					OTA_ERR("当前版本已是最新\n");
-					free(buf);
-					OTA_ERR("!!!reboot\n");
-					system("reboot");					
-					pthread_exit(NULL);
-				}
+	if ((len = read(client_socket, buf, 64)) != 0)
+	{
+		if (len < 0) {
+	        OTA_ERR("Error reading from socket\n");
+	        free(buf);
+	        pthread_exit(NULL);
+	    } else if (len < 64) {
+	        OTA_ERR("Incomplete data read\n");
+	        free(buf);
+	        pthread_exit(NULL);
+	    }
+		memcpy(ota_str,buf,64);
+		ota_str[63]='\0';
+		OTA_INFO("!!!ota_str%s\n",ota_str);
+		
+		memcpy(ver_str,ota_str+3,7);
+		OTA_INFO("ver_str is %s\n",ver_str);
+		
+		GetDevVer(tmpVer);
+		OTA_INFO("tmpVer is %s\n",tmpVer);
+		
+		if (compare_versions(tmpVer, ver_str)) {
+			OTA_INFO("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
+
+		} else {
+			if (strcmp(ver_str, "0.0.0.0") == 0){
+				OTA_ERR("版本%s 强制升级\n",ver_str);
+			}else{
+				OTA_ERR("当前版本已是最新\n");
+				free(buf);
+				OTA_INFO("!!!reboot\n");
+				//system("reboot");	
+				//execl("/sbin/reboot", "reboot", NULL);
+				pthread_exit(NULL);
 			}
+		}
 
-			//SetDevVer(ver_str);
-			
-			memcpy(md5_get,ota_str+10,32);
-			for (int i = 0; i < 64; i++)
-		   {
-			   printf("0x%02x ", md5_get[i]);
-		   }
-		   OTA_ERR(" \r\n");
-			
+		//SetDevVer(ver_str);
+		memset(md5_get, 0, sizeof(md5_get));
+		memcpy(md5_get,ota_str+10,32);
+
+		OTA_INFO("%s\n", md5_get);			
 
         //write(fd, buf, len);
         //progressBar(length, resp.content_length);
     }
 	memset(buf,0,4096);
-	OTA_ERR("!!!sizeof(buf)%d\n",mem_size * sizeof(char));
 	resp.content_length -= 64;
 
 	//创建文件描述符
@@ -322,19 +372,21 @@ void * download(void * socket_d)
     //从套接字中读取文件流
     while ((len = read(client_socket, buf, buf_len)) != 0 && length < resp.content_length)
 	{
-		/*if(length<4096){
-			memcpy(ota_str,buf,64);
-			ota_str[63]='\0';
-			OTA_ERR("!!!ota_str%s",ota_str);
-
-		}*/
-		//OTA_ERR("!!!len%d\n",len);
-        write(fd, buf, len);
-        length += len;
-		memset(buf,0,4096);
-        progressBar(length, resp.content_length);
+		if (len != -1)
+		{
+			write(fd, buf, len);
+			length += len;
+			memset(buf,0,4096);
+			progressBar(length, resp.content_length);
+		}
+		else
+		{
+		    OTA_ERR("Error reading data from socket\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
     }
- 
+ 	free(buf);
+	
     if (length == resp.content_length)
         OTA_ERR("Download successful length %dresp.content_length%d^_^\n\n",length,resp.content_length);
 #if 1	
@@ -345,27 +397,41 @@ void * download(void * socket_d)
 	ret = Compute_file_md5(file_upgrade, md5_str);
 	if (0 == ret)
 	{
-		OTA_ERR("[file - %s] md5 value:\n", file_upgrade);
-		OTA_ERR("%s\n", md5_str);
+		OTA_INFO("[file - %s] md5 value:\n", file_upgrade);
+		OTA_INFO("%s\n", md5_str);
+	}
+	else
+	{
+	    OTA_ERR("Error computing file MD5\n");
+	    // 可以根据具体情况采取适当的处理措施
 	}
 	
 	if (strncasecmp(md5_get, md5_str, 32) == 0)
 	{
-		OTA_ERR("md5_str is fuhe\n");
+		OTA_INFO("md5_str is fuhe\n");
 	}else{
 		OTA_ERR("md5_str is bufuhe\n");
 
 	}
 	
 	char SnOut[64]={0,0,0,0};
-	readStringValue("ipc", "sn", SnOut, "/root/app.ini");
-	OTA_ERR("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
+	ret = readStringValue("ipc", "sn", SnOut, "/root/app.ini");
+	if (ret == 1)
+	{
+	    // 读取配置值成功
+	}
+	else
+	{
+	    OTA_ERR("Error reading configuration value\n");
+	    // 可以根据具体情况采取适当的处理措施
+	}
+	OTA_INFO("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
 	if(SnOut[3] == ota_str[42]&&SnOut[4] == ota_str[43]){
-		OTA_ERR("SN fuhe!!!!!!\n");
+		OTA_INFO("SN fuhe!!!!!!\n");
 	}else{
 		OTA_ERR("SN bufuhe!!!!!!\n");
-		system("reboot");
-		exit(0);
+		//execl("/sbin/reboot", "reboot", NULL);
+		pthread_exit(NULL);
 	}
 	
 	system("rm upgrade.tar");
@@ -374,8 +440,17 @@ void * download(void * socket_d)
 	system("./busybox tar xvf upgrade.tar");
 	
 	char file_path[64]={0,0,0,0};
-	readStringValue("file", "extest", file_path, "./ota.ini");
-	OTA_ERR("!!!file_path%s\n",file_path);
+	ret = readStringValue("file", "extest", file_path, "./ota.ini");
+	if (ret == 1)
+	{
+	    // 读取配置值成功
+	}
+	else
+	{
+	    OTA_ERR("Error reading configuration value\n");
+	    // 可以根据具体情况采取适当的处理措施
+	}
+	OTA_INFO("!!!file_path%s\n",file_path);
 	
 	char extest[] = "extest";
     //char file_path[] = "/path/to/destination/file";
@@ -387,8 +462,17 @@ void * download(void * socket_d)
     system(command);
 
 	memset(file_path,0,64);
-	readStringValue("file", "111", file_path, "./ota.ini");
-		OTA_ERR("!!!file_path%s\n",file_path);
+	ret = readStringValue("file", "111", file_path, "./ota.ini");
+	if (ret == 1)
+	{
+	    // 读取配置值成功
+	}
+	else
+	{
+	    OTA_ERR("Error reading configuration value\n");
+	    // 可以根据具体情况采取适当的处理措施
+	}
+	OTA_INFO("!!!file_path%s\n",file_path);
 
 	char eee[] = "111";
     //char file_path[] = "/path/to/destination/file";
@@ -398,70 +482,87 @@ void * download(void * socket_d)
 
     system(command);
 	
-	readStringValue("ota", "sv", ver_str, "./ota.ini");
+	ret = readStringValue("ota", "sv", ver_str, "./ota.ini");
+	if (ret == 1)
+	{
+	    // 读取配置值成功
+	}
+	else
+	{
+	    OTA_ERR("Error reading configuration value\n");
+	    // 可以根据具体情况采取适当的处理措施
+	}
 
 	SetDevVer(ver_str);
 	OTA_ERR("!!!reboot\n");
-	system("reboot");
+	//execl("/sbin/reboot", "reboot", NULL);
+	pthread_exit(NULL);
 #endif
 }
 #endif
-
-#include <sys/stat.h>
 
 int upgrade_from_card(char *path)
 {
 	if(access(path, F_OK ) != -1 ) 
 	{
-		OTA_ERR("!!!file exist,%s\n",path);
+		OTA_INFO("!!!file exist,%s\n",path);
 		
 		struct stat statbuf; 
 		stat(path,&statbuf); 
 		int size=statbuf.st_size;
-		OTA_ERR("size %d\n",size);
+		OTA_INFO("size %d\n",size);
 
 		int length = 0;
 		int mem_size = 4096;//mem_size might be enlarge, so reset it
 		int buf_len = mem_size;//read 4k each time
 		int len;
-
-		//创建文件描述符
-		int fd = open("upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
-		if (fd < 0)
-		{
-			OTA_ERR("Create file failed\n");
-			exit(0);
-		}
-
-		char *buf = (char *) malloc(mem_size * sizeof(char));
 		char ver_str[64]={0};
 		char tmpVer[64]={0};
 
 		char ota_str[64];
 		char md5_get[32];
 
+		//创建文件描述符
+		int fd = open("upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
+		if (fd < 0)
+		{
+			OTA_ERR("Create file failed\n");
+			return -1;
+		}
+
+		char *buf = (char *) malloc(mem_size * sizeof(char));
+		if (buf != NULL)
+		{
+		    // 内存分配成功
+		}
+		else
+		{
+		    OTA_ERR("Error allocating memory\n");
+		    return -1;
+		}
+
 		int card_fd = open(path, O_RDONLY);
 		if (card_fd < 0)
 		{
 			OTA_ERR("Create fd failed\n");
 			free(buf);
-			exit(1);
+			return -1;
 		}
 		
 		if ((read(card_fd, buf, 64)) != 0)
 		{
 				memcpy(ota_str,buf,64);
 				ota_str[63]='\0';
-				OTA_ERR("!!!ota_str%s\n",ota_str);
+				OTA_INFO("!!!ota_str%s\n",ota_str);
 				
 				memcpy(ver_str,ota_str+3,7);
-				OTA_ERR("ver_str is %s\n",ver_str);
+				OTA_INFO("ver_str is %s\n",ver_str);
 				
 				GetDevVer(tmpVer);
-				OTA_ERR("tmpVer is %s\n",tmpVer);
+				OTA_INFO("tmpVer is %s\n",tmpVer);
 				
 				if (compare_versions(tmpVer, ver_str)) {
-					OTA_ERR("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
+					OTA_INFO("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
 
 				} else {
 					if (strcmp(ver_str, "0.0.0.0") == 0){
@@ -472,35 +573,38 @@ int upgrade_from_card(char *path)
 						close(fd);						
 						close(card_fd);
 						OTA_ERR("!!!reboot\n");
-						system("reboot");
+						//execl("/sbin/reboot", "reboot", NULL);
+						return -1;
 					}
 				}
 
 				//SetDevVer(ver_str);
 				
 				memcpy(md5_get,ota_str+10,32);
-				for (int i = 0; i < 64; i++)
-			   {
-				   printf("0x%02x ", md5_get[i]);
-			   }
-			   OTA_ERR(" \r\n");
-				
+				OTA_INFO("%s\n", md5_get);		
 
-			//write(fd, buf, len);
-			//progressBar(length, resp.content_length);
 		}
 		memset(buf,0,sizeof(buf));
-		OTA_ERR("!!!sizeof(buf)%d\n",mem_size * sizeof(char));
+		//OTA_INFO("!!!sizeof(buf)%d\n",mem_size * sizeof(char));
 		size -= 64;
 		//从套接字中读取文件流
 		while ((len = read(card_fd, buf, buf_len)) != 0 && length < size)
 		{
-			write(fd, buf, len);
-			length += len;
+			if (len != -1)
+			{
+				write(fd, buf, len);
+				length += len;
+				progressBar(length, size);
+			}
+			else
+			{
+			    OTA_ERR("Error reading data from socket\n");
+			    // 可以根据具体情况采取适当的处理措施
+			}
 		}
 
 		if (length == size)
-			OTA_ERR("split successful length %d  size%d^_^\n\n",length,size);
+			OTA_INFO("split successful length %d  size%d^_^\n\n",length,size);
 #if 1	
 		int ret;
 		const char *file_upgrade = "upgrade.tar.lzma";
@@ -509,29 +613,43 @@ int upgrade_from_card(char *path)
 		ret = Compute_file_md5(file_upgrade, md5_str);
 		if (0 == ret)
 		{
-			OTA_ERR("[file - %s] md5 value:\n", file_upgrade);
-			OTA_ERR("%s\n", md5_str);
+			OTA_INFO("[file - %s] md5 value:\n", file_upgrade);
+			OTA_INFO("%s\n", md5_str);
+		}
+		else
+		{
+		    OTA_ERR("Error computing file MD5\n");
+		    // 可以根据具体情况采取适当的处理措施
 		}
 
 		if (strncasecmp(md5_get, md5_str, 32) == 0)
 		{
-			OTA_ERR("md5_str is fuhe\n");
+			OTA_INFO("md5_str is fuhe\n");
 		}else{
 			OTA_ERR("md5_str is bufuhe\n");			
-			system("reboot");			
-			exit(0);
+			//execl("/sbin/reboot", "reboot", NULL);			
+			return -1;
 
 		}
 
 		char SnOut[64]={0,0,0,0};
-		readStringValue("ipc", "sn", SnOut, "/root/app.ini");
-		OTA_ERR("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
+		ret = readStringValue("ipc", "sn", SnOut, "/root/app.ini");
+		if (ret == 1)
+		{
+		    // 读取配置值成功
+		}
+		else
+		{
+		    OTA_ERR("Error reading configuration value\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
+		OTA_INFO("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
 		if(SnOut[3] == ota_str[42]&&SnOut[4] == ota_str[43]){
-			OTA_ERR("SN fuhe!!!!!!\n");
+			OTA_INFO("SN fuhe!!!!!!\n");
 		}else{
 			OTA_ERR("SN bufuhe!!!!!!\n");
-			system("reboot");
-			exit(0);
+			//execl("/sbin/reboot", "reboot", NULL);
+			return -1;
 		}
 
 		system("rm upgrade.tar");
@@ -540,8 +658,17 @@ int upgrade_from_card(char *path)
 		system("./busybox tar xvf upgrade.tar");
 
 		char file_path[64];
-		readStringValue("file", "extest", file_path, "./ota.ini");
-		OTA_ERR("!!!file_path%s\n",file_path);
+		ret = readStringValue("file", "extest", file_path, "./ota.ini");
+		if (ret == 1)
+		{
+		    // 读取配置值成功
+		}
+		else
+		{
+		    OTA_ERR("Error reading configuration value\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
+		OTA_INFO("!!!file_path%s\n",file_path);
 
 		char extest[] = "extest";
 		//char file_path[] = "/path/to/destination/file";
@@ -551,8 +678,17 @@ int upgrade_from_card(char *path)
 		sprintf(command, "cp %s %s", extest, file_path);
 		system(command);
 
-		readStringValue("file", "111", file_path, "./ota.ini");
-			OTA_ERR("!!!file_path%s\n",file_path);
+		ret = readStringValue("file", "111", file_path, "./ota.ini");
+		if (ret == 1)
+		{
+		    // 读取配置值成功
+		}
+		else
+		{
+		    OTA_ERR("Error reading configuration value\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
+		OTA_INFO("!!!file_path%s\n",file_path);
 
 		char eee[] = "111";
 		//char file_path[] = "/path/to/destination/file";
@@ -562,16 +698,27 @@ int upgrade_from_card(char *path)
 
 		system(command);
 
-		readStringValue("ota", "sv", ver_str, "./ota.ini");
+		ret = readStringValue("ota", "sv", ver_str, "./ota.ini");
+		if (ret == 1)
+		{
+		    // 读取配置值成功
+		}
+		else
+		{
+		    OTA_ERR("Error reading configuration value\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
 
 		SetDevVer(ver_str);
-		OTA_ERR("!!!reboot\n");
-		system("reboot");
+		OTA_INFO("!!!reboot\n");
+		//execl("/sbin/reboot", "reboot", NULL);
+		return -1;
 #endif
 	}else 
 	{
 		OTA_ERR("!!!file doesn't exist,exit\n");
-		exit(0);
+		//exit(0);
+		pthread_exit(NULL);
 	}
 
 }
@@ -581,54 +728,54 @@ int upgrade_from_card2(char *path)
 {
 	if(access(path, F_OK ) != -1 ) 
 	{
-		OTA_ERR("!!!file exist,%s\n",path);
+		OTA_INFO("!!!file exist,%s\n",path);
 		char *buf = (char *) malloc(64 * sizeof(char));
 		if (buf == NULL) {
-			OTA_ERR("Memory allocation failed\n");
+			OTA_INFO("Memory allocation failed\n");
 			exit(1);
 		}
 		
 		struct stat statbuf; 
 		stat(path,&statbuf); 
 		int size=statbuf.st_size;
-		OTA_ERR("size %d\n",size);
+		OTA_INFO("size %d\n",size);
 		int length=0;
 
 		
 		int fd = open(path, O_RDONLY);
 		if (fd < 0)
 		{
-			OTA_ERR("Create fd failed\n");
+			OTA_INFO("Create fd failed\n");
 			free(buf);
 			exit(1);
 		}
 		int len = read(fd, buf, 64);
 		if (len < 0) {
-			OTA_ERR("Read file failed\n");
+			OTA_INFO("Read file failed\n");
 			free(buf);
 			close(fd);
 			exit(1);
 		}
 			for (int i = 0; i < len; i++)
 		   {
-			   printf("%c", buf[i]);
+			   OTA_INFO("%c", buf[i]);
 		   }
-		   OTA_ERR(" \r\n");
+		   OTA_INFO(" \r\n");
 		char ver_str[32];
 		memcpy(ver_str,buf+3,7);
 		ver_str[7] = '\0';
-		OTA_ERR("ver_str is %s\n",ver_str);
+		OTA_INFO("ver_str is %s\n",ver_str);
 		
 		char tmpVer[64]={0};
 		GetDevVer(tmpVer);
-		OTA_ERR("tmpVer is %s\n",tmpVer);
+		OTA_INFO("tmpVer is %s\n",tmpVer);
 		if (compare_versions(tmpVer, ver_str)) {
-			OTA_ERR("需要升级到版本 %s\n", ver_str);
+			OTA_INFO("需要升级到版本 %s\n", ver_str);
 			
 			int split_fd = open("upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
 			if (split_fd < 0)
 			{
-				OTA_ERR("Create file failed\n");
+				OTA_INFO("Create file failed\n");
 				exit(0);
 			}
 			while ((len = read(fd, buf, 4096)) != 0 && length < size)
@@ -640,7 +787,7 @@ int upgrade_from_card2(char *path)
 			free(buf);
 			close(fd);
 			
-			OTA_ERR("!!!length%d\n",length);
+			OTA_INFO("!!!length%d\n",length);
 
 			system("rm upgrade.tar");
 
@@ -650,8 +797,8 @@ int upgrade_from_card2(char *path)
 							char file_path[64]={0,0,0,0};
 	//readStringValue("file", "extest", file_path, "./ota.ini");
 	GetOtaApp(file_path);
-	OTA_ERR("!!!file_path%s\n",file_path);
-			OTA_ERR("11111111111\n");
+	OTA_INFO("!!!file_path%s\n",file_path);
+			OTA_INFO("11111111111\n");
 
 			char command[100];
 			//char file_path[64]={0};
@@ -660,8 +807,8 @@ int upgrade_from_card2(char *path)
 			
 			readStringValue("file", "extest", file_path, "/tmp/ota.ini");
 						sleep(2);
-			OTA_ERR("22222222222\n");
-			OTA_ERR("!!!file_path%s\n",file_path);
+			OTA_INFO("22222222222\n");
+			OTA_INFO("!!!file_path%s\n",file_path);
 			
 			char extest[] = "extest";
 			//char file_path[] = "/path/to/destination/file";
@@ -671,7 +818,7 @@ int upgrade_from_card2(char *path)
 			system(command);
 
 			readStringValue("file", "111", file_path, "/tmp/ota.ini");
-			OTA_ERR("!!!file_path%s\n",file_path);
+			OTA_INFO("!!!file_path%s\n",file_path);
 
 			char eee[] = "111";
 			//char file_path[] = "/path/to/destination/file";
@@ -681,13 +828,13 @@ int upgrade_from_card2(char *path)
 
 			system(command);
 			SetDevVer(ver_str);
-			OTA_ERR("!!!reboot\n");
-			//system("reboot");
+			OTA_INFO("!!!reboot\n");
+			//execl("/sbin/reboot", "reboot", NULL);
 			exit("0");
 
 			return 1;
 		} else {
-			OTA_ERR("当前版本已是最新\n");
+			OTA_INFO("当前版本已是最新\n");
 			free(buf);
 			close(fd);
 			return 0;
@@ -695,11 +842,11 @@ int upgrade_from_card2(char *path)
 		/*char upgrade_str[64];
 		memcpy(upgrade_str,buf,64);
 		upgrade_str[63]='\0';
-		OTA_ERR("!!!upgrade_str%s\n",upgrade_str);*/
+		OTA_INFO("!!!upgrade_str%s\n",upgrade_str);*/
 	} 
 	else 
 	{
-		OTA_ERR("!!!file doesn't exist,exit\n");
+		OTA_INFO("!!!file doesn't exist,exit\n");
 		exit(0);
 	}
 }
@@ -716,7 +863,7 @@ int main(int argc, char const *argv[])
  
     if (argc == 1)
     {
-        printf("Input a valid URL please\n");
+        OTA_INFO("Input a valid URL please\n");
         exit(0);
     }
     else{
@@ -725,6 +872,8 @@ int main(int argc, char const *argv[])
 			strcpy(url, argv[1]);
 		}else{
 			upgrade_from_card(argv[1]);
+			OTA_INFO("reboot -- p\n");
+			system("reboot -- p");
 			return 0;
 		}
 	}
@@ -736,7 +885,7 @@ int main(int argc, char const *argv[])
     get_ip_addr(domain, ip_addr);
     if (strlen(ip_addr) == 0)
     {
-        printf("can not get ip address\n");
+        OTA_INFO("can not get ip address\n");
         return 0;
     }
  
@@ -751,13 +900,13 @@ int main(int argc, char const *argv[])
             "Connection:close\r\n"\
             "\r\n"\
         ,url, domain);
-  printf("\n>>>>GET header:<<<<\n%s", header);
+  OTA_INFO("\n>>>>GET header:<<<<\n%s", header);
  
     //创建套接字
     int client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (client_socket < 0)
     {
-        printf("invalid socket descriptor: %d\n", client_socket);
+        OTA_INFO("invalid socket descriptor: %d\n", client_socket);
         exit(-1);
     }
  
@@ -772,7 +921,7 @@ int main(int argc, char const *argv[])
     int res = connect(client_socket, (struct sockaddr *) &addr, sizeof(addr));
     if (res == -1)
     {
-        printf("connect failed, return: %d\n", res);
+        OTA_INFO("connect failed, return: %d\n", res);
         exit(-1);
     }
  
@@ -795,7 +944,7 @@ int main(int argc, char const *argv[])
             char * temp = (char *) realloc(response, sizeof(char) * mem_size);
             if (temp == NULL)
             {
-                printf("realloc failed\n");
+                OTA_INFO("realloc failed\n");
                 exit(-1);
             }
             response = temp;
@@ -814,7 +963,7 @@ int main(int argc, char const *argv[])
         length += len;
     }
  
-    printf("\n>>>>Response header:<<<<\n%s", response);
+    OTA_INFO("\n>>>>Response header:<<<<\n%s", response);
     resp = get_resp_header(response);
     strcpy(resp.file_name, file_name);
  
@@ -825,4 +974,6 @@ int main(int argc, char const *argv[])
 
 	free(response);
     free(buf);
+	OTA_INFO("reboot -- p\n");
+	system("reboot -- p");
 }
