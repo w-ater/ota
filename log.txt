@@ -1,0 +1,38 @@
+==89727== Memcheck, a memory error detector
+==89727== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==89727== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==89727== Command: ./otest http://47.100.168.206:8080/ota/upgrade.img
+==89727== Parent PID: 76850
+==89727== 
+==89727== Thread 2:
+==89727== Conditional jump or move depends on uninitialised value(s)
+==89727==    at 0x4845818: strlen (vg_replace_strmem.c:502)
+==89727==    by 0x4907D14: __vfprintf_internal (vfprintf-internal.c:1688)
+==89727==    by 0x48F0C69: fprintf (fprintf.c:32)
+==89727==    by 0x10B831: download (ota.c:358)
+==89727==    by 0x4874608: start_thread (pthread_create.c:477)
+==89727==    by 0x49AE352: clone (clone.S:95)
+==89727==  Uninitialised value was created by a stack allocation
+==89727==    at 0x10B1A9: download (ota.c:292)
+==89727== 
+==89727== 
+==89727== HEAP SUMMARY:
+==89727==     in use at exit: 0 bytes in 0 blocks
+==89727==   total heap usage: 36 allocs, 36 frees, 58,846 bytes allocated
+==89727== 
+==89727== All heap blocks were freed -- no leaks are possible
+==89727== 
+==89727== ERROR SUMMARY: 64 errors from 1 contexts (suppressed: 0 from 0)
+==89727== 
+==89727== 64 errors in context 1 of 1:
+==89727== Conditional jump or move depends on uninitialised value(s)
+==89727==    at 0x4845818: strlen (vg_replace_strmem.c:502)
+==89727==    by 0x4907D14: __vfprintf_internal (vfprintf-internal.c:1688)
+==89727==    by 0x48F0C69: fprintf (fprintf.c:32)
+==89727==    by 0x10B831: download (ota.c:358)
+==89727==    by 0x4874608: start_thread (pthread_create.c:477)
+==89727==    by 0x49AE352: clone (clone.S:95)
+==89727==  Uninitialised value was created by a stack allocation
+==89727==    at 0x10B1A9: download (ota.c:292)
+==89727== 
+==89727== ERROR SUMMARY: 64 errors from 1 contexts (suppressed: 0 from 0)

@@ -280,6 +280,49 @@ int  SetDevVer(const char* ver_in)
 {
 	writeStringVlaue("ipc", "ver", ver_in, CFGINI);
 }
+void read_ini_node(const char *filename, const char *node) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        printf("Error opening file\n");
+        return;
+    }
+
+    char line[100];
+	char command[100];
+    char *key, *value;
+    int count = 0;
+
+    while (fgets(line, sizeof(line), file)) {
+        if (strstr(line, node) != NULL) {
+            while (fgets(line, sizeof(line), file)) {
+                if (line[0] == '[') {
+                    break;
+                }
+
+                key = strtok(line, "=");
+                value = strtok(NULL, "=");
+
+                if (key != NULL && value != NULL) {
+                    printf("Key: %s, Value: %s\n", key, value);
+                    count++;
+
+					OTA_INFO("!!!file_path%s\n",value);
+
+					memset(command,0,100);
+					sprintf(command, "cp %s %s", key, value);
+
+					system(command);
+                }
+            }
+            break;
+        }
+    }
+
+    printf("Total number of key-value pairs in node %s: %d\n", node, count);
+
+    fclose(file);
+}
+
 int compare_versions(char *current_version, char *upgrade_version) {
     if (strcmp(upgrade_version, current_version) > 0) {
         return 1; // 需要升级
@@ -437,52 +480,12 @@ void * download(void * socket_d)
 	system("rm upgrade.tar");
 
 	system("lzma -d upgrade.tar.lzma");
-	system("./busybox tar xvf upgrade.tar");
+	system("./busybox tar xvf upgrade.tar -C /tmp");
 	
-	char file_path[64]={0,0,0,0};
-	ret = readStringValue("file", "extest", file_path, "./ota.ini");
-	if (ret == 1)
-	{
-	    // 读取配置值成功
-	}
-	else
-	{
-	    OTA_ERR("Error reading configuration value\n");
-	    // 可以根据具体情况采取适当的处理措施
-	}
-	OTA_INFO("!!!file_path%s\n",file_path);
+	read_ini_node("/tmp/ota.ini", "file");
+
 	
-	char extest[] = "extest";
-    //char file_path[] = "/path/to/destination/file";
-
-    char command[100];
-	memset(command,0,100);
-
-    sprintf(command, "cp %s %s", extest, file_path);
-    system(command);
-
-	memset(file_path,0,64);
-	ret = readStringValue("file", "111", file_path, "./ota.ini");
-	if (ret == 1)
-	{
-	    // 读取配置值成功
-	}
-	else
-	{
-	    OTA_ERR("Error reading configuration value\n");
-	    // 可以根据具体情况采取适当的处理措施
-	}
-	OTA_INFO("!!!file_path%s\n",file_path);
-
-	char eee[] = "111";
-    //char file_path[] = "/path/to/destination/file";
-
-    memset(command,0,100);
-    sprintf(command, "cp %s %s", eee, file_path);
-
-    system(command);
-	
-	ret = readStringValue("ota", "sv", ver_str, "./ota.ini");
+	ret = readStringValue("ota", "sv", ver_str, "/tmp/ota.ini");
 	if (ret == 1)
 	{
 	    // 读取配置值成功
@@ -501,7 +504,7 @@ void * download(void * socket_d)
 }
 #endif
 
-int upgrade_from_card(char *path)
+int upgrade_from_card3(char *path)
 {
 	if(access(path, F_OK ) != -1 ) 
 	{
@@ -718,7 +721,7 @@ int upgrade_from_card(char *path)
 	{
 		OTA_ERR("!!!file doesn't exist,exit\n");
 		//exit(0);
-		pthread_exit(NULL);
+		return -1;
 	}
 
 }
@@ -851,6 +854,206 @@ int upgrade_from_card2(char *path)
 	}
 }
 
+int upgrade_from_card(char *path)
+{
+	if(access(path, F_OK ) != -1 ) 
+	{
+		OTA_INFO("!!!file exist,%s\n",path);
+		
+		struct stat statbuf; 
+		stat(path,&statbuf); 
+		int size=statbuf.st_size;
+		OTA_INFO("size %d\n",size);
+
+		int length = 0;
+		int mem_size = 4096;//mem_size might be enlarge, so reset it
+		int buf_len = mem_size;//read 4k each time
+		int len;
+		char ver_str[64]={0};
+		char tmpVer[64]={0};
+
+		char ota_str[64];
+		char md5_get[32];
+
+		//创建文件描述符
+		int fd = open("upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
+		if (fd < 0)
+		{
+			OTA_ERR("Create file failed\n");
+			return -1;
+		}
+
+		char *buf = (char *) malloc(mem_size * sizeof(char));
+		if (buf != NULL)
+		{
+		    // 内存分配成功
+		}
+		else
+		{
+		    OTA_ERR("Error allocating memory\n");
+		    return -1;
+		}
+
+		int card_fd = open(path, O_RDONLY);
+		if (card_fd < 0)
+		{
+			OTA_ERR("Create fd failed\n");
+			free(buf);
+			return -1;
+		}
+		
+		if ((read(card_fd, buf, 64)) != 0)
+		{
+				memcpy(ota_str,buf,64);
+				ota_str[63]='\0';
+				OTA_INFO("!!!ota_str%s\n",ota_str);
+				
+				memcpy(ver_str,ota_str+3,7);
+				OTA_INFO("ver_str is %s\n",ver_str);
+				
+				GetDevVer(tmpVer);
+				OTA_INFO("tmpVer is %s\n",tmpVer);
+				
+				if (compare_versions(tmpVer, ver_str)) {
+					OTA_INFO("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
+
+				} else {
+					if (strcmp(ver_str, "0.0.0.0") == 0){
+						OTA_ERR("版本%s 强制升级\n",ver_str);
+					}else{
+						OTA_ERR("当前版本已是最新\n");
+						free(buf);
+						close(fd);						
+						close(card_fd);
+						OTA_ERR("!!!reboot\n");
+						//execl("/sbin/reboot", "reboot", NULL);
+						return -1;
+					}
+				}
+
+				//SetDevVer(ver_str);
+				
+				memcpy(md5_get,ota_str+10,32);
+				OTA_INFO("%s\n", md5_get);		
+
+		}
+		memset(buf,0,sizeof(buf));
+		//OTA_INFO("!!!sizeof(buf)%d\n",mem_size * sizeof(char));
+		size -= 64;
+		//从套接字中读取文件流
+		while ((len = read(card_fd, buf, buf_len)) != 0 && length < size)
+		{
+			if (len != -1)
+			{
+				write(fd, buf, len);
+				length += len;
+				progressBar(length, size);
+			}
+			else
+			{
+			    OTA_ERR("Error reading data from socket\n");
+			    // 可以根据具体情况采取适当的处理措施
+			}
+		}
+
+		if (length == size)
+			OTA_INFO("split successful length %d  size%d^_^\n\n",length,size);
+#if 1	
+		int ret;
+		const char *file_upgrade = "upgrade.tar.lzma";
+		char md5_str[MD5_STR_LEN + 1];
+
+		ret = Compute_file_md5(file_upgrade, md5_str);
+		if (0 == ret)
+		{
+			OTA_INFO("[file - %s] md5 value:\n", file_upgrade);
+			OTA_INFO("%s\n", md5_str);
+		}
+		else
+		{
+		    OTA_ERR("Error computing file MD5\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
+
+		if (strncasecmp(md5_get, md5_str, 32) == 0)
+		{
+			OTA_INFO("md5_str is fuhe\n");
+		}else{
+			OTA_ERR("md5_str is bufuhe\n");			
+			//execl("/sbin/reboot", "reboot", NULL);			
+			return -1;
+
+		}
+
+		char SnOut[64]={0,0,0,0};
+		ret = readStringValue("ipc", "sn", SnOut, "/root/app.ini");
+		if (ret == 1)
+		{
+		    // 读取配置值成功
+		}
+		else
+		{
+		    OTA_ERR("Error reading configuration value\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
+		OTA_INFO("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
+		if(SnOut[3] == ota_str[42]&&SnOut[4] == ota_str[43]){
+			OTA_INFO("SN fuhe!!!!!!\n");
+		}else{
+			OTA_ERR("SN bufuhe!!!!!!\n");
+			//execl("/sbin/reboot", "reboot", NULL);
+			return -1;
+		}
+
+		system("rm upgrade.tar");
+
+		system("lzma -d upgrade.tar.lzma");
+		system("./busybox tar xvf upgrade.tar");
+
+		read_ini_node("ota.ini", "file");
+
+		ret = readStringValue("ota", "sv", ver_str, "./ota.ini");
+		if (ret == 1)
+		{
+		    // 读取配置值成功
+		}
+		else
+		{
+		    OTA_ERR("Error reading configuration value\n");
+		    // 可以根据具体情况采取适当的处理措施
+		}
+
+		SetDevVer(ver_str);
+		OTA_INFO("!!!reboot\n");
+		//execl("/sbin/reboot", "reboot", NULL);
+		return -1;
+#endif
+	}else 
+	{
+		OTA_ERR("!!!file doesn't exist,exit\n");
+		//exit(0);
+		return -1;
+	}
+
+}
+#include <sys/sysinfo.h>
+#include <sys/statvfs.h>
+
+long getAvailableSpace()
+{
+    struct statvfs buf;
+    if (statvfs("/root", &buf) == 0)
+    {
+        long available_space = buf.f_bsize * buf.f_bavail;
+		
+		OTA_ERR("available_space %ld\n",available_space);
+        return available_space;
+    }
+    return -1; // 获取失败
+}
+
+
+
 int main(int argc, char const *argv[])
 {
 	//check_upgradeimg();
@@ -907,6 +1110,8 @@ int main(int argc, char const *argv[])
     if (client_socket < 0)
     {
         OTA_INFO("invalid socket descriptor: %d\n", client_socket);
+		OTA_INFO("reboot -- p\n");
+		system("reboot -- p");
         exit(-1);
     }
  
@@ -955,7 +1160,7 @@ int main(int argc, char const *argv[])
  
         //找到响应头的头部信息, 两个"\n\r"为分割点
         int flag = 0;
-	int i=0;
+		int i=0;
         for (i = strlen(response) - 1; response[i] == '\n' || response[i] == '\r'; i--, flag++);
         if (flag == 4)
             break;
@@ -966,7 +1171,45 @@ int main(int argc, char const *argv[])
     OTA_INFO("\n>>>>Response header:<<<<\n%s", response);
     resp = get_resp_header(response);
     strcpy(resp.file_name, file_name);
- 
+	
+	struct statvfs buf2;
+    if (statvfs("/root", &buf2) == 0) {
+        unsigned long block_size = buf2.f_frsize; // 文件系统块大小
+        unsigned long available_blocks = buf2.f_bavail; // 可用块数量
+        unsigned long available_space = block_size * available_blocks;
+        
+        printf("可用空间大小：%lu bytes\n", available_space);
+    } else {
+        printf("无法获取/root分区信息\n");
+    }
+	struct sysinfo sys_info;
+
+    // 获取系统信息
+    if (sysinfo(&sys_info) != 0) {
+        perror("sysinfo");
+        return 1;
+    }
+
+    // 打印可用内存大小
+    printf("Total RAM: %lu KB\n", sys_info.totalram / 1024);
+    printf("Free RAM: %lu KB\n", sys_info.freeram / 1024);
+
+    // 打印可用Flash大小
+    printf("Total Swap: %lu KB\n", sys_info.totalswap / 1024);
+    printf("Free Swap: %lu KB\n", sys_info.freeswap / 1024);
+	
+
+
+// 主函数中的代码段
+long flash_space = getAvailableSpace();
+OTA_ERR("Flash空间大小flash_space %ld\n",flash_space);
+
+if (flash_space < resp.content_length)
+{
+    OTA_ERR("Flash空间不足，无法完成升级flash_space %ld\n",flash_space);
+
+}
+	return 1;
     /*开新的线程下载文件*/
     pthread_t download_thread;
     pthread_create(&download_thread, NULL, download, (void *) &client_socket);
