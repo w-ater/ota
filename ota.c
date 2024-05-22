@@ -42,6 +42,16 @@
 #include "./wolfssl/openssl/ssl.h"  //wolfssl转openssl的兼容层
 #include "./wolfssl/ssl.h" 
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <wolfssl/ssl.h>
+
+
 #define SERIAL_PORT "/dev/ttyUSB2"
 #define BUFFER_SIZE 256
 
@@ -87,684 +97,86 @@ static void OTA_HEX(FILE* f, void* dat, uint32_t len)
         fprintf(f, "%02X ", p[i]);
     fprintf(f, "\r\n");
 }
-typedef struct
-{
-    pthread_t thread_id;
-    char ip[256];
-    bool result;
-    bool actionEnd;
-} GetHostName_Struct;
-
-static void* ws_getHostThread(void* argv)
-{
-    int32_t ret;
-    //int32_t i;
-    char buf[1024];
-    struct hostent host_body, *host = NULL;
-    struct in_addr **addr_list;
-    GetHostName_Struct *gs = (GetHostName_Struct *)argv;
-
-    /*  此类方法不可重入!  即使关闭线程
-    if((host = gethostbyname(gs->ip)) == NULL)
-    //if((host = gethostbyname2(gs->ip, AF_INET)) == NULL)
-    {
-        gs->actionEnd = true;
-        return NULL;
-    }*/
-    if (gethostbyname_r(gs->ip, &host_body, buf, sizeof(buf), &host, &ret))
-    {
-        gs->actionEnd = true;
-        return NULL;
-    }
-
-    if (host == NULL)
-    {
-        gs->actionEnd = true;
-        return NULL;
-    }
-
-    addr_list = (struct in_addr **)host->h_addr_list;
-    // printf("ip name: %s\r\nip list: ", host->h_name);
-    // for(i = 0; addr_list[i] != NULL; i++)
-    //     printf("%s, ", inet_ntoa(*addr_list[i]));
-    // printf("\r\n");
-
-    //一个域名可用解析出多个ip,这里只用了第一个
-    if (addr_list[0] == NULL)
-    {
-        gs->actionEnd = true;
-        return NULL;
-    }
-    memset(gs->ip, 0, sizeof(gs->ip));
-    strcpy(gs->ip, (char*)(inet_ntoa(*addr_list[0])));
-    gs->result = true;
-    gs->actionEnd = true;
-    return NULL;
-}
-
-int32_t ws_getIpByHostName(const char* hostName, char* retIp, int32_t timeoutMs)
-{
-    int32_t timeout = 0;
-    GetHostName_Struct gs;
-    if (!hostName || strlen(hostName) < 1)
-        return -1;
-    //开线程从域名获取IP
-    memset(&gs, 0, sizeof(GetHostName_Struct));
-    strcpy(gs.ip, hostName);
-    gs.result = false;
-    gs.actionEnd = false;
-    if (pthread_create(&gs.thread_id, NULL, ws_getHostThread, &gs) < 0)
-        return -1;
-    //等待请求结果
-    do {
-        usleep(1000);
-    } while (!gs.actionEnd && ++timeout < timeoutMs);
-    //pthread_cancel(gs.thread_id);
-    pthread_join(gs.thread_id, NULL);
-    if (!gs.result)
-        return -timeout;
-    //一个域名可用解析出多个ip,这里只用了第一个
-    memset(retIp, 0, strlen((const char*)retIp));
-    strcpy(retIp, gs.ip);
-    return timeout;
-}
-//https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
-//static void ws_buildHttpHead(char* ip, int32_t port, char* path, char* shakeKey, char* package)
-//{
-//    const char httpDemo[] =
-//        "GET %s HTTP/1.1\r\n"
-//        "Connection: Upgrade\r\n"
-//        "Host: %s:%d\r\n"
-//        "Sec-WebSocket-Key: %s\r\n"
-//        "Sec-WebSocket-Version: 13\r\n"
-//        "Upgrade: websocket\r\n\r\n";
-//    sprintf(package, httpDemo, path, ip, port, shakeKey);
-//}
-
-int32_t https_buildHttpHead(char* ip, char* path, char* shakeKey, char* package)
-{
-		
-//    char ip[128] = {0};
-//    char path[128] = {0};
-//	
-//	strcpy(ip, "application.daguiot.com");
-//	
-//	memset(path, 0, sizeof(path));
-//	char pathDemo[] = "/ota/error?version=1.0.0.1&msg=\"\"";
-	
-	const char httpDemo[] =
-	"GET %s HTTP/1.1\r\n"
-	"Host: %s\r\n"
-	"Accept-Encoding:gzip, deflate, br\r\n"
-    "Connection:close\r\n"\
-	"Cache-Control:no-cache\r\n"
-	"Content-Length:0\r\n"
-	"\r\n";
-	sprintf(package, httpDemo, path, ip);
-	OTA_INFO("package %s\n",package);
-}
-//==================== 加密方法BASE64 ====================
-
-//base64编/解码用的基础字符集
-static const char ws_base64char[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-int32_t ws_base64_encode(const uint8_t* bindata, char* base64, int32_t binlength)
-{
-    int32_t i, j;
-    uint8_t current;
-    for (i = 0, j = 0; i < binlength; i += 3)
-    {
-        current = (bindata[i] >> 2);
-        current &= (uint8_t)0x3F;
-        base64[j++] = ws_base64char[(int32_t)current];
-        current = ((uint8_t)(bindata[i] << 4)) & ((uint8_t)0x30);
-        if (i + 1 >= binlength)
-        {
-            base64[j++] = ws_base64char[(int32_t)current];
-            base64[j++] = '=';
-            base64[j++] = '=';
-            break;
-        }
-        current |= ((uint8_t)(bindata[i + 1] >> 4)) & ((uint8_t)0x0F);
-        base64[j++] = ws_base64char[(int32_t)current];
-        current = ((uint8_t)(bindata[i + 1] << 2)) & ((uint8_t)0x3C);
-        if (i + 2 >= binlength)
-        {
-            base64[j++] = ws_base64char[(int32_t)current];
-            base64[j++] = '=';
-            break;
-        }
-        current |= ((uint8_t)(bindata[i + 2] >> 6)) & ((uint8_t)0x03);
-        base64[j++] = ws_base64char[(int32_t)current];
-        current = ((uint8_t)bindata[i + 2]) & ((uint8_t)0x3F);
-        base64[j++] = ws_base64char[(int32_t)current];
-    }
-    base64[j] = '\0';
-    return j;
-}
-/*******************************************************************************
- * 名称: ws_base64_decode
- * 功能: base64格式解码为ascii
- * 参数: 
- *      base64: base64字符串输入
- *      bindata: ascii字符串输出
- * 返回: 解码出来的ascii字符串长度
- * 说明: 无
- ******************************************************************************/
-int32_t ws_base64_decode(const char* base64, uint8_t* bindata)
-{
-    int32_t i, j;
-    uint8_t k;
-    uint8_t temp[4];
-    for (i = 0, j = 0; base64[i] != '\0'; i += 4)
-    {
-        memset(temp, 0xFF, sizeof(temp));
-        for (k = 0; k < 64; k++)
-        {
-            if (ws_base64char[k] == base64[i])
-                temp[0] = k;
-        }
-        for (k = 0; k < 64; k++)
-        {
-            if (ws_base64char[k] == base64[i + 1])
-                temp[1] = k;
-        }
-        for (k = 0; k < 64; k++)
-        {
-            if (ws_base64char[k] == base64[i + 2])
-                temp[2] = k;
-        }
-        for (k = 0; k < 64; k++)
-        {
-            if (ws_base64char[k] == base64[i + 3])
-                temp[3] = k;
-        }
-        bindata[j++] = ((uint8_t)(((uint8_t)(temp[0] << 2)) & 0xFC)) |
-                       ((uint8_t)((uint8_t)(temp[1] >> 4) & 0x03));
-        if (base64[i + 2] == '=')
-            break;
-        bindata[j++] = ((uint8_t)(((uint8_t)(temp[1] << 4)) & 0xF0)) |
-                       ((uint8_t)((uint8_t)(temp[2] >> 2) & 0x0F));
-        if (base64[i + 3] == '=')
-            break;
-        bindata[j++] = ((uint8_t)(((uint8_t)(temp[2] << 6)) & 0xF0)) |
-                       ((uint8_t)(temp[3] & 0x3F));
-    }
-    return j;
-}
-typedef struct SHA1Context
-{
-    uint32_t Message_Digest[5];
-    uint32_t Length_Low;
-    uint32_t Length_High;
-    uint8_t Message_Block[64];
-    int32_t Message_Block_Index;
-    int32_t Computed;
-    int32_t Corrupted;
-} SHA1Context;
-
-#define SHA1CircularShift(bits, word) ((((word) << (bits)) & 0xFFFFFFFF) | ((word) >> (32 - (bits))))
-
-static void SHA1ProcessMessageBlock(SHA1Context *context)
-{
-    const uint32_t K[] = {0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6};
-    int32_t t;
-    uint32_t temp;
-    uint32_t W[80];
-    uint32_t A, B, C, D, E;
-
-    for (t = 0; t < 16; t++)
-    {
-        W[t] = ((uint32_t)context->Message_Block[t * 4]) << 24;
-        W[t] |= ((uint32_t)context->Message_Block[t * 4 + 1]) << 16;
-        W[t] |= ((uint32_t)context->Message_Block[t * 4 + 2]) << 8;
-        W[t] |= ((uint32_t)context->Message_Block[t * 4 + 3]);
-    }
-
-    for (t = 16; t < 80; t++)
-        W[t] = SHA1CircularShift(1, W[t - 3] ^ W[t - 8] ^ W[t - 14] ^ W[t - 16]);
-
-    A = context->Message_Digest[0];
-    B = context->Message_Digest[1];
-    C = context->Message_Digest[2];
-    D = context->Message_Digest[3];
-    E = context->Message_Digest[4];
-
-    for (t = 0; t < 20; t++)
-    {
-        temp = SHA1CircularShift(5, A) + ((B & C) | ((~B) & D)) + E + W[t] + K[0];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30, B);
-        B = A;
-        A = temp;
-    }
-    for (t = 20; t < 40; t++)
-    {
-        temp = SHA1CircularShift(5, A) + (B ^ C ^ D) + E + W[t] + K[1];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30, B);
-        B = A;
-        A = temp;
-    }
-    for (t = 40; t < 60; t++)
-    {
-        temp = SHA1CircularShift(5, A) + ((B & C) | (B & D) | (C & D)) + E + W[t] + K[2];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30, B);
-        B = A;
-        A = temp;
-    }
-    for (t = 60; t < 80; t++)
-    {
-        temp = SHA1CircularShift(5, A) + (B ^ C ^ D) + E + W[t] + K[3];
-        temp &= 0xFFFFFFFF;
-        E = D;
-        D = C;
-        C = SHA1CircularShift(30, B);
-        B = A;
-        A = temp;
-    }
-    context->Message_Digest[0] = (context->Message_Digest[0] + A) & 0xFFFFFFFF;
-    context->Message_Digest[1] = (context->Message_Digest[1] + B) & 0xFFFFFFFF;
-    context->Message_Digest[2] = (context->Message_Digest[2] + C) & 0xFFFFFFFF;
-    context->Message_Digest[3] = (context->Message_Digest[3] + D) & 0xFFFFFFFF;
-    context->Message_Digest[4] = (context->Message_Digest[4] + E) & 0xFFFFFFFF;
-    context->Message_Block_Index = 0;
-}
-
-static void SHA1Reset(SHA1Context* context)
-{
-    context->Length_Low = 0;
-    context->Length_High = 0;
-    context->Message_Block_Index = 0;
-
-    context->Message_Digest[0] = 0x67452301;
-    context->Message_Digest[1] = 0xEFCDAB89;
-    context->Message_Digest[2] = 0x98BADCFE;
-    context->Message_Digest[3] = 0x10325476;
-    context->Message_Digest[4] = 0xC3D2E1F0;
-
-    context->Computed = 0;
-    context->Corrupted = 0;
-}
-
-static void SHA1PadMessage(SHA1Context* context)
-{
-    if (context->Message_Block_Index > 55)
-    {
-        context->Message_Block[context->Message_Block_Index++] = 0x80;
-        while (context->Message_Block_Index < 64)
-            context->Message_Block[context->Message_Block_Index++] = 0;
-        SHA1ProcessMessageBlock(context);
-        while (context->Message_Block_Index < 56)
-            context->Message_Block[context->Message_Block_Index++] = 0;
-    }
-    else
-    {
-        context->Message_Block[context->Message_Block_Index++] = 0x80;
-        while (context->Message_Block_Index < 56)
-            context->Message_Block[context->Message_Block_Index++] = 0;
-    }
-    context->Message_Block[56] = (context->Length_High >> 24) & 0xFF;
-    context->Message_Block[57] = (context->Length_High >> 16) & 0xFF;
-    context->Message_Block[58] = (context->Length_High >> 8) & 0xFF;
-    context->Message_Block[59] = (context->Length_High) & 0xFF;
-    context->Message_Block[60] = (context->Length_Low >> 24) & 0xFF;
-    context->Message_Block[61] = (context->Length_Low >> 16) & 0xFF;
-    context->Message_Block[62] = (context->Length_Low >> 8) & 0xFF;
-    context->Message_Block[63] = (context->Length_Low) & 0xFF;
-
-    SHA1ProcessMessageBlock(context);
-}
-
-static int32_t SHA1Result(SHA1Context* context)
-{
-    if (context->Corrupted)
-    {
-        return 0;
-    }
-    if (!context->Computed)
-    {
-        SHA1PadMessage(context);
-        context->Computed = 1;
-    }
-    return 1;
-}
-
-static void SHA1Input(SHA1Context* context, const char* message_array, uint32_t length)
-{
-    if (!length)
-        return;
-
-    if (context->Computed || context->Corrupted)
-    {
-        context->Corrupted = 1;
-        return;
-    }
-
-    while (length-- && !context->Corrupted)
-    {
-        context->Message_Block[context->Message_Block_Index++] = (*message_array & 0xFF);
-
-        context->Length_Low += 8;
-
-        context->Length_Low &= 0xFFFFFFFF;
-        if (context->Length_Low == 0)
-        {
-            context->Length_High++;
-            context->Length_High &= 0xFFFFFFFF;
-            if (context->Length_High == 0)
-                context->Corrupted = 1;
-        }
-
-        if (context->Message_Block_Index == 64)
-        {
-            SHA1ProcessMessageBlock(context);
-        }
-        message_array++;
-    }
-}
-
-static char* sha1_hash(const char* source)
-{
-    SHA1Context sha;
-    char* buff = NULL;
-
-    SHA1Reset(&sha);
-    SHA1Input(&sha, source, strlen(source));
-
-    if (!SHA1Result(&sha))
-        OTA_ERR("SHA1 ERROR: Could not compute message digest \r\n");
-    else
-    {
-        buff = (char*)calloc(128, sizeof(char));
-        sprintf(buff, "%08X%08X%08X%08X%08X",
-                sha.Message_Digest[0],
-                sha.Message_Digest[1],
-                sha.Message_Digest[2],
-                sha.Message_Digest[3],
-                sha.Message_Digest[4]);
-    }
-    return buff;
-}
-
-static void https_getRandomString(char* buff, uint32_t len)
-{
-    uint32_t i;
-    uint8_t temp;
-    srand((int32_t)time(0));
-    for (i = 0; i < len; i++)
-    {
-        temp = (uint8_t)(rand() % 256);
-        if (temp == 0) //随机数不要0
-            temp = 128;
-        buff[i] = temp;
-    }
-}
-
-/*******************************************************************************
- * 名称: ws_buildShakeKey
- * 功能: client端使用随机数构建握手用的key
- * 参数: *key: 随机生成的握手key
- * 返回: key的长度
- * 说明: 无
- ******************************************************************************/
-static int32_t ws_buildShakeKey(char* key)
-{
-    char tempKey[16] = {0};
-    https_getRandomString(tempKey, 16);
-    return ws_base64_encode((const uint8_t*)tempKey, (char*)key, 16);
-}
-static int32_t ws_buildRespondShakeKey(char* acceptKey, uint32_t acceptKeyLen, char* respondKey)
-{
-    char* clientKey;
-    char* sha1DataTemp;
-    uint8_t* sha1Data;
-    int32_t i, j, sha1DataTempLen, ret;
-    const char guid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    uint32_t guidLen;
-
-    if (acceptKey == NULL)
-        return 0;
-
-    guidLen = sizeof(guid);
-    clientKey = (char*)calloc(acceptKeyLen + guidLen + 10, sizeof(char));
-    memcpy(clientKey, acceptKey, acceptKeyLen);
-    memcpy(&clientKey[acceptKeyLen], guid, guidLen);
-
-    sha1DataTemp = sha1_hash(clientKey);
-    sha1DataTempLen = strlen((const char*)sha1DataTemp);
-    sha1Data = (uint8_t*)calloc(sha1DataTempLen / 2 + 1, sizeof(char));
-
-    //把hex字符串如"12ABCDEF",转为数值数组如{0x12,0xAB,0xCD,0xEF}
-    for (i = j = 0; i < sha1DataTempLen;)
-    {
-        if (sha1DataTemp[i] > '9')
-            sha1Data[j] = (10 + sha1DataTemp[i] - 'A') << 4;
-        else
-            sha1Data[j] = (sha1DataTemp[i] - '0') << 4;
-
-        i += 1;
-
-        if (sha1DataTemp[i] > '9')
-            sha1Data[j] |= (10 + sha1DataTemp[i] - 'A');
-        else
-            sha1Data[j] |= (sha1DataTemp[i] - '0');
-
-        i += 1;
-        j += 1;
-    }
-
-    ret = ws_base64_encode((const uint8_t*)sha1Data, (char*)respondKey, j);
-
-    free(sha1DataTemp);
-    free(sha1Data);
-    free(clientKey);
-    return ret;
-}
-
-static int32_t ws_matchShakeKey(char* clientKey, int32_t clientKeyLen, char* acceptKey, int32_t acceptKeyLen)
-{
-    int32_t retLen;
-    char tempKey[MY_BUF_SIZE] = {0};
-
-    retLen = ws_buildRespondShakeKey(clientKey, clientKeyLen, tempKey);
-    if (retLen != acceptKeyLen)
-    {
-        OTA_INFO("len err, clientKey[%d] != acceptKey[%d]\r\n", retLen, acceptKeyLen);
-        return -1;
-    }
-    else if (strcmp((const char*)tempKey, (const char*)acceptKey) != 0)
-    {
-        OTA_INFO("strcmp err, clientKey[%s -> %s] != acceptKey[%s]\r\n", clientKey, tempKey, acceptKey);
-        return -1;
-    }
-    return 0;
-}
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-
-#define PORT_NUMBER 80
-#define HOST "application.daguiot.com"
-#define MESSAGE "GET /ota/error?version=1.0.0.1&msg=hello HTTP/1.1\r\nHost: application.daguiot.com\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n"
-
-int mylink() {
-    int sockfd;
-    struct sockaddr_in server_addr;
-    struct hostent *server;
-
-    // 创建套接字
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        perror("Error opening socket");
-        exit(1);
-    }
-
-    // 获取服务器地址
-    server = gethostbyname(HOST);
-    if (server == NULL) {
-        fprintf(stderr,"Error, no such host\n");
-        exit(1);
-    }
-
-    // 设置服务器地址结构
-    bzero((char *) &server_addr, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&server_addr.sin_addr.s_addr, server->h_length);
-    server_addr.sin_port = htons(PORT_NUMBER);
-
-    // 连接到服务器
-    if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        perror("Error connecting");
-        exit(1);
-    }
-    SSL *myssl = NULL;
-    SSL_CTX *ctx = NULL;
-#if 0   
-    wolfSSL_Init();
-    ctx = SSL_CTX_new (SSLv23_client_method());
-    if((ctx) == NULL)
-    {
-        OTA_ERR("Fun:%s\tSSL_CTX ERROR\n", __FUNCTION__);
-        return -1;
-    }
-    OTA_INFO("tim add SSL_CTX_set_verify test############\n");
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);//fix SSL_connect fail
-
-    if( (myssl = SSL_new(ctx)) == NULL) {
-        fprintf(stderr, "wolfSSL_new error.\n");
-        //exit(EXIT_FAILURE);
-		return -1;
-    }
-
-    SSL_set_fd(myssl, sockfd);
-	//SSL_set_mode(myssl, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-	//SSL_set_mode(myssl, SSL_MODE_AUTO_RETRY);
-
-	
-    int ssl_ret;
-    int fgCycleFlag = 1;
-    while(fgCycleFlag )
-    {
-        ssl_ret = SSL_connect(myssl);
-        switch(SSL_get_error(myssl, ssl_ret))//这里出错
-        {
-            case SSL_ERROR_NONE:
-                OTA_INFO("Fun:%s\tSSL_ERROR_NONE,ssl_ret = %d\n", __FUNCTION__,ssl_ret);
-                fgCycleFlag = 0;
-                usleep(100000);
-                break;
-            case SSL_ERROR_WANT_WRITE:
-                OTA_ERR("Fun:%s\tSSL_ERROR_WANT_WRITE,ssl_ret = %d\n", __FUNCTION__,ssl_ret);
-                usleep(100000);
-                return -1;
-            case SSL_ERROR_WANT_READ:
-                OTA_ERR("Fun:%s\tSSL_ERROR_WANT_READ,ssl_ret = %d\n", __FUNCTION__,ssl_ret);
-                usleep(100000);
-                return -1;
-            default:    
-                OTA_ERR("SSL_connect:%s SSL_get_error= %d\n", __FUNCTION__,SSL_get_error(myssl, ssl_ret));
-                return -1;
-        }   
-    }
+#if 0
+enum  ErrorCode2{
+  kSuccess = 0,   //升级成功
+  kError = 1,  //升级失败
+  kOmahaRequestError = 2, //请求action错误（action机制用于控制升级每个步骤）
+  kOmahaResponseHandlerError = 3,   //返回handler action错误
+  kFilesystemCopierError = 4,  //文件系统拷贝错误
+  kPostinstallRunnerError = 5,   //预编译运行步骤错误（PostinstallRunner是一个升级步骤）
+  kPayloadMismatchedType = 6,    //NOT NEED
+  kInstallDeviceOpenError = 7, //安装设备打开错误
+  kKernelDeviceOpenError = 8, //内核设备打开错误
+  kDownloadTransferError = 9, //下载传输错误
+  kPayloadHashMismatchError = 10, //升级包hash未匹配错误
+  kPayloadSizeMismatchError = 11,   //升级包size未匹配错误
+  kDownloadPayloadVerificationError = 12, //下载过程升级包校验错误
+  kDownloadNewPartitionInfoError = 13, //下载过程新分区信息错误
+  kDownloadWriteError = 14,   //下载过程数据写入错误
+  kNewRootfsVerificationError = 15, //升级分区hash校验失败
+  kNewKernelVerificationError = 16, //升级kernel校验失败
+  kSignedDeltaPayloadExpectedError = 17,  //NOT NEED
+  kDownloadPayloadPubKeyVerificationError = 18, //下载过程升级包public key公钥校验错误
+  kPostinstallBootedFromFirmwareB = 19,   //NOT NEED
+  kDownloadStateInitializationError = 20, //下载状态初始化错误
+  kDownloadInvalidMetadataMagicString = 21, //NOT NEED
+  kDownloadSignatureMissingInManifest = 22,  //下载过程manifest缺少签名错误
+  kDownloadManifestParseError = 23, //下载过程manifest分析错误
+  kDownloadMetadataSignatureError = 24,   //下载过程元数据签名错误
+  kDownloadMetadataSignatureVerificationError = 25,   //下载过程元数据签名校验错误
+  kDownloadMetadataSignatureMismatch = 26,   //下载过程元数据签名不匹配错误
+  kDownloadOperationHashVerificationError = 27, //下载过程操作hash校验错误
+  kDownloadOperationExecutionError = 28,  //下载过程操作执行错误
+  kDownloadOperationHashMismatch = 29, //下载过程操作hash不匹配错误
+  kOmahaRequestEmptyResponseError = 30,   //请求action无返回错误
+  kOmahaRequestXMLParseError = 31,  //请求action分析xml错误
+  kDownloadInvalidMetadataSize = 32,   //下载过程非法元数据大小
+  kDownloadInvalidMetadataSignature = 33, //下载过程非法元数据签名
+  kOmahaResponseInvalid = 34, //返回action非法错误
+  kOmahaUpdateIgnoredPerPolicy = 35,   //NOT NEED（含义是接收已回滚版本，忽略此次升级）
+  kOmahaUpdateDeferredPerPolicy = 36,  //NOT NEED（含义是因更新策略延迟，忽略此次升级）
+  kOmahaErrorInHTTPResponse = 37,   //HTTP返回错误
+  kDownloadOperationHashMissingError = 38,   //下载过程操作时缺失hash错误
+  kDownloadMetadataSignatureMissingError = 39,  //下载过程元数据签名缺失错误
+  kOmahaUpdateDeferredForBackoff = 40,    //NOT NEED（含义是忽略本次升级）
+  kPostinstallPowerwashError = 41,  //NOT NEED（回滚报错，该版本已去除版本回滚限制）
+  kUpdateCanceledByChannelChange = 42, //通道变化升级取消
+  kPostinstallFirmwareRONotUpdatable = 43, //NOT NEED(需要升级固件firmware时才会取消，因为无法从FW B分区启动到FW A分区)
+  kUnsupportedMajorPayloadVersion = 44, //获取manifest偏移量错误
+  kUnsupportedMinorPayloadVersion = 45,   //未manifest可支持更小版本错误
+  kOmahaRequestXMLHasEntityDecl = 46, //请求action xml hash非法错误
+  kFilesystemVerifierError = 47, //文件系统校验错误（FilesystemVerifier是一个升级步骤）
+  kUserCanceled = 48, //用户取消
+  kNonCriticalUpdateInOOBE = 49, //NOT NEED（Ignoring a non-critical Omaha update before OOBE completion.）
+  kOmahaUpdateIgnoredOverCellular = 50,   //NOT NEED（未设置设备策略，因此用户首选项需要覆盖是否允许通过蜂窝网络进行更新）
+  kPayloadTimestampError = 51, //升级包时间戳错误 （payload.bin是OTA镜像打包文件）
+  kUpdatedButNotActive = 52,  //升级分区非action状态错误
+  kNoUpdate = 53, //无升级（There are no updates. Aborting.）
+  kRollbackNotPossible = 54,  //NOT NEED
+  kFirstActiveOmahaPingSentPersistenceError = 55,  //NOT NEED（用于旧设备的Omaha校验）
+  kVerityCalculationError = 56,  //校验计算错误（在FilesystemVerifier步骤中进行分区校验时）
+};
 #endif
-    wolfSSL_Init();
-        ctx = SSL_CTX_new(SSLv23_client_method());
-        if (ctx == NULL) {
-            OTA_INFO("Fun:%s\tSSL_CTX ERROR\n", __FUNCTION__);
-            return -1;
-        }
-    
-        OTA_INFO("tim add SSL_CTX_set_verify test############\n");
-        SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0); //fix SSL_connect fail
-    
-        myssl = SSL_new(ctx);
-        if (myssl == NULL) {
-            fprintf(stderr, "wolfSSL_new error.\n");
-            SSL_CTX_free(ctx); // 释放SSL上下文
-            return -1;
-        }
-    
-        SSL_set_fd(myssl, sockfd);
-        int ssl_ret;
-        int fgCycleFlag = 1;
-        while (fgCycleFlag) {
-            ssl_ret = SSL_connect(myssl);
-            switch (ssl_ret) {
-                case 1: // SSL连接成功
-                    OTA_INFO("Fun:%s\tSSL connect successful\n", __FUNCTION__);
-                    fgCycleFlag = 0;
-                    usleep(100000);
-                    break;
-                case 0: // SSL连接失败
-                case -1: // SSL连接出错
-                    OTA_ERR("SSL_connect error in %s\n", __FUNCTION__);
-                    //SSL_free(myssl); // 释放SSL对象
-                    //SSL_CTX_free(ctx); // 释放SSL上下文
-                    return -1;
-                case -2: // 需要再次调用SSL_connect
-                    OTA_ERR("Fun:%s\tSSL connect in progress\n", __FUNCTION__);
-                    usleep(100000);
-                    return -1;
-                default:
-                    OTA_ERR("Unknown SSL_connect return value\n");
-                    //SSL_free(myssl); // 释放SSL对象
-                    //SSL_CTX_free(ctx); // 释放SSL上下文
-                    return -1;
-            }
-        }
-
-    // 发送消息
-    int n = write(sockfd, MESSAGE, strlen(MESSAGE));
-    if (n < 0) {
-        perror("Error writing to socket");
-        exit(1);
-    }
-
-    // 从服务器接收响应
-    char buffer[256];
-    bzero(buffer, 256);
-    while (read(sockfd, buffer, 255) > 0) {
-        OTA_INFO("%s", buffer);
-        bzero(buffer, 256);
-    }
-
-    // 关闭套接字
-    close(sockfd);
-
-    return 0;
-}
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <wolfssl/ssl.h>
-
+enum  ErrorCode{
+  kSuccess = 0,   //升级成功
+  kError = 1,  //升级失败
+  kPayloadMD5MismatchError = 2,  //
+  kInsufficientFlashsizeError,  //flash空间不足
+  kSNMismatchError, //
+};
 #define PORT_NUMBER 443
 #define HOST "application.daguiot.com"
-#define MESSAGE "GET /ota/error?version=1.0.0.1&msg=hello HTTP/1.1\r\nHost: application.daguiot.com\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n"
+#define MESSAGE2 "GET /ota/error?version=1.0.0.1&msg=%s HTTP/1.1\r\nHost: application.daguiot.com\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n"
 
 
-int myconnect() {
+int myconnect(int data) {
     int sockfd;
     struct sockaddr_in server_addr;
     struct hostent *server;
     WOLFSSL_CTX *ctx;
     WOLFSSL *ssl;
+    char msg[256];
 
     // wolfSSL初始化
     wolfSSL_Init();
@@ -833,9 +245,16 @@ int myconnect() {
             exit(1);
         }
     }
-
+    
+    //printf("MESSAGE %s\n",MESSAGE);
+    char buffer[256];
+    bzero(buffer, 256);
+    
+	char MESSAGE[] = "GET /ota/error?version=1.0.0.1&msg=%d HTTP/1.1\r\nHost: application.daguiot.com\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n";
+	sprintf(buffer, MESSAGE, data);
+    printf("buffer %s\n",buffer);
     // 发送消息
-    int n = wolfSSL_write(ssl, MESSAGE, strlen(MESSAGE));
+    int n = wolfSSL_write(ssl, buffer, strlen(buffer));
     if (n < 0) {
         perror("Error writing to socket");
         wolfSSL_free(ssl);
@@ -845,123 +264,21 @@ int myconnect() {
     }
 
     // 从服务器接收响应
-    char buffer[256];
     bzero(buffer, 256);
     while (wolfSSL_read(ssl, buffer, 255) > 0) {
         printf("%s", buffer);
         bzero(buffer, 256);
     }
 
-    // 关闭wolfSSL连接
-    wolfSSL_free(ssl);
-    wolfSSL_CTX_free(ctx);
-
-    // 关闭套接字
-    close(sockfd);
-
-    // wolfSSL清理
-    wolfSSL_Cleanup();
-
-    return 0;
-}
-
-int myconnect2() {
-    int sockfd;
-    struct sockaddr_in server_addr;
-    struct hostent *server;
-    WOLFSSL_CTX *ctx;
-    WOLFSSL *ssl;
-
-    // wolfSSL初始化
-    wolfSSL_Init();
-
-    // 创建套接字
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        perror("Error opening socket");
-        exit(1);
-    }
-
-    // 获取服务器地址
-    server = gethostbyname(HOST);
-    if (server == NULL) {
-        fprintf(stderr, "Error, no such host\n");
-        exit(1);
-    }
-
-    // 设置服务器地址结构
-    bzero((char *) &server_addr, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&server_addr.sin_addr.s_addr, server->h_length);
-    server_addr.sin_port = htons(PORT_NUMBER);
-
-    // 连接到服务器
-    if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        perror("Error connecting");
-        exit(1);
-    }
-
-    // 创建wolfSSL上下文
-    ctx = wolfSSL_CTX_new(wolfSSLv23_client_method());
-    if (ctx == NULL) {
-        fprintf(stderr, "wolfSSL_CTX_new error.\n");
-        close(sockfd);
-        exit(1);
-    }
-
-    // 创建wolfSSL对象
-    ssl = wolfSSL_new(ctx);
-    if (ssl == NULL) {
-        fprintf(stderr, "wolfSSL_new error.\n");
-        wolfSSL_CTX_free(ctx);
-        close(sockfd);
-        exit(1);
-    }
-
-    // 将wolfSSL对象与套接字关联
-    wolfSSL_set_fd(ssl, sockfd);
-
-    // SSL连接
-//    if (wolfSSL_connect(ssl) != SSL_SUCCESS) {
-//        fprintf(stderr, "wolfSSL_connect error.\n");
+    // 发送消息
+//    n = wolfSSL_write(ssl, &data, sizeof(int)); // 上传整数参数
+//    if (n < 0) {
+//        perror("Error writing to socket");
 //        wolfSSL_free(ssl);
 //        wolfSSL_CTX_free(ctx);
 //        close(sockfd);
 //        exit(1);
 //    }
-    // SSL连接
-    int ret;
-    while ((ret = wolfSSL_connect(ssl)) != SSL_SUCCESS) {
-        int error = wolfSSL_get_error(ssl, ret);
-        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
-            // 连接仍在进行中，继续尝试
-            continue;
-        } else {
-            fprintf(stderr, "wolfSSL_connect error: %s\n", wolfSSL_ERR_error_string(error, 0));
-            wolfSSL_free(ssl);
-            wolfSSL_CTX_free(ctx);
-            close(sockfd);
-            exit(1);
-        }
-    }
-
-    // 发送消息
-    int n = wolfSSL_write(ssl, MESSAGE, strlen(MESSAGE));
-    if (n < 0) {
-        perror("Error writing to socket");
-        wolfSSL_free(ssl);
-        wolfSSL_CTX_free(ctx);
-        close(sockfd);
-        exit(1);
-    }
-
-    // 从服务器接收响应
-    char buffer[256];
-    bzero(buffer, 256);
-    while (wolfSSL_read(ssl, buffer, 255) > 0) {
-        printf("%s", buffer);
-        bzero(buffer, 256);
-    }
 
     // 关闭wolfSSL连接
     wolfSSL_free(ssl);
@@ -976,170 +293,7 @@ int myconnect2() {
     return 0;
 }
 
-//t32_t https_postServer(char* ip, int32_t port, char* path, int32_t timeoutMs)
-int32_t https_postServer(char* ip, char* path, int32_t timeoutMs)
-{
-    int32_t ret, fd;
-    int32_t timeoutCount = 0;
-    char retBuff[512] = {0};
-    char httpHead[512] = {0};
-    char shakeKey[128] = {0};
-    char tempIp[128] = {0};
-    char* p;
 
-    //服务器端网络地址结构体
-    struct sockaddr_in report_addr;
-    memset(&report_addr, 0, sizeof(report_addr)); //数据初始化--清零
-    report_addr.sin_family = AF_INET;             //设置为IP通信
-    //report_addr.sin_port = htons(port);           //服务器端口号
-    report_addr.sin_port = 0; 
-
-    //服务器IP地址, 自动域名转换
-    //report_addr.sin_addr.s_addr = inet_addr(ip);
-    if ((report_addr.sin_addr.s_addr = inet_addr(ip)) == INADDR_NONE)
-    {
-        ret = ws_getIpByHostName(ip, tempIp, 1000);
-        if (ret < 0)
-            return ret;
-        else if (strlen((const char*)tempIp) < 7)
-            return -ret;
-        else
-            timeoutCount += ret;
-        if ((report_addr.sin_addr.s_addr = inet_addr(tempIp)) == INADDR_NONE)
-            return -ret;
-#ifdef OTA_DEBUG
-        OTA_INFO("Host(%s) to IP(%s)\r\n", ip, tempIp);
-#endif
-    }
-
-    //默认超时1秒
-    if (timeoutMs == 0)
-        timeoutMs = 1000;
-
-    //create unix socket
-    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        OTA_ERR("socket error\r\n");
-        return -1;
-    }
-    OTA_ERR("111111111111111\r\n");
-    // 设置非阻塞
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-
-    // 开始连接
-    if (connect(fd, (struct sockaddr *)&report_addr, sizeof(struct sockaddr)) < 0)
-    {
-        if (errno == EINPROGRESS)
-        {
-            // 连接正在进行中，使用select等待连接完成
-            fd_set writefds;
-            struct timeval tv;
-            FD_ZERO(&writefds);
-            FD_SET(fd, &writefds);
-
-            tv.tv_sec = timeoutMs / 1000;
-            tv.tv_usec = (timeoutMs % 1000) * 1000;
-
-            ret = select(fd + 1, NULL, &writefds, NULL, &tv);
-            if (ret <= 0)
-            {
-                perror("select error");
-                close(fd);
-                return -1;
-            }
-        }
-        else
-        {
-            perror("connect error");
-            close(fd);
-            return -1;
-        }
-    }
-
-    //connect
-    //timeoutCount = 0;
-//    while (connect(fd, (struct sockaddr *)&report_addr, sizeof(struct sockaddr)) != 0)
-//    {
-//        if (++timeoutCount > timeoutMs)
-//        {
-//            OTA_ERR("connect to %s:%d timeout(%dms)\r\n", ip, timeoutCount);
-//            close(fd);
-//            return -timeoutCount;
-//        }
-//        usleep(1000);
-//    }
-
-
-    OTA_ERR("22222222222222\r\n");
-
-    //非阻塞
-//    ret = fcntl(fd, F_GETFL, 0);
-//    fcntl(fd, F_SETFL, ret | O_NONBLOCK);
-
-    //发送http协议头
-    memset(shakeKey, 0, sizeof(shakeKey));
-    ws_buildShakeKey(shakeKey);                                   //创建握手key
-    memset(httpHead, 0, sizeof(httpHead));                        //创建协议包
-    //https_buildHttpHead(ip, path, shakeKey, (char*)httpHead); //组装http请求头
-    
-    https_buildHttpHead(ip, path, shakeKey, (char*)httpHead); //组装http请求头
-    send(fd, httpHead, strlen((const char*)httpHead), MSG_NOSIGNAL);
-
-#ifdef OTA_DEBUG
-    OTA_INFO("connect: %dms\r\n%s\r\n", timeoutCount, httpHead);
-#endif
-    while (1)
-    {
-        memset(retBuff, 0, sizeof(retBuff));
-        ret = recv(fd, retBuff, sizeof(retBuff), MSG_NOSIGNAL);
-        if (ret > 0)
-        {
-#ifdef OTA_DEBUG
-            //显示http返回
-            OTA_INFO("recv: len %d / %dms\r\n%s\r\n", ret, timeoutCount, retBuff);
-#endif
-            //返回的是http回应信息
-            if (strncmp((const char*)retBuff, "HTTP", 4) == 0)
-            {
-                //定位到握手字符串
-                if ((p = strstr((char*)retBuff, "Sec-WebSocket-Accept: ")) != NULL)
-                {
-                    p += strlen("Sec-WebSocket-Accept: ");
-                    sscanf((const char*)p, "%s\r\n", p);
-                    //比对握手信息
-                    if (ws_matchShakeKey(shakeKey, strlen((const char*)shakeKey), p, strlen((const char*)p)) == 0)
-                    {
-	                    strcpy(httpHead,"hello");	
-						send(fd, httpHead, strlen((const char*)httpHead), MSG_NOSIGNAL);
-                        return fd;
-                    }
-					//握手信号不对, 重发协议包
-                    else
-                        ret = send(fd, httpHead, strlen((const char*)httpHead), MSG_NOSIGNAL);
-                }
-                //重发协议包
-                else
-                    ret = send(fd, httpHead, strlen((const char*)httpHead), MSG_NOSIGNAL);
-            }
-            //显示异常返回数据
-            else
-            {
-                //#ifdef WS_DEBUG
-                OTA_ERR("recv: len %d / unknown context\r\n%s\r\n", ret, retBuff);
-                OTA_HEX(stderr, retBuff, ret);
-                //#endif
-            }
-        }
-        usleep(1000);
-        //超时检查
-        if (++timeoutCount > timeoutMs * 2)
-            break;
-    }
-    //连接失败,返回耗时(负值)
-    close(fd);
-    return -timeoutCount;
-}
 
 struct resp_header//保持相应头信息
 {
@@ -1778,7 +932,7 @@ void * parseAndextract(void * arg)
 		    // 可以根据具体情况采取适当的处理措施
 		}
     }
-	system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
+	//system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
  	free(buf);
 	
 #if 1
@@ -1795,7 +949,7 @@ void * parseAndextract(void * arg)
 	else
 	{
 	    OTA_ERR("Error computing file MD5\n");
-	    // 可以根据具体情况采取适当的处理措施
+        //myconnect(kPayloadMD5MismatchError);
 	}
 	
 	if (strncasecmp(md5_get, md5_str, 32) == 0)
@@ -1803,7 +957,9 @@ void * parseAndextract(void * arg)
 		OTA_INFO("md5_str is fuhe\n");
 	}else{
 		OTA_ERR("md5_str is bufuhe\n");
-
+        myconnect(kPayloadMD5MismatchError);
+        
+		pthread_exit(NULL);
 	}
 	
 	char SnOut[64]={0,0,0,0};
@@ -1823,6 +979,8 @@ void * parseAndextract(void * arg)
 	}else{
 		OTA_ERR("SN bufuhe!!!!!!\n");
 		//execl("/sbin/reboot", "reboot", NULL);
+		
+        myconnect(kSNMismatchError);
 		pthread_exit(NULL);
 	}
 	
@@ -1844,16 +1002,11 @@ void * parseAndextract(void * arg)
 	{
 	
 //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
-		char *ip = "application.daguiot.com";
-		char *path ="/ota/error?version=1.0.0.1&msg=\"\"";
+
 	    OTA_ERR("Flash空间不足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
-//        mylink();
-        myconnect();
-//		if ((fd = https_postServer(ip, path, 3000)) <= 0)
-//	    {
-//	        printf("connect failed !!\r\n");
-//	        return -1;
-//	    }
+        myconnect(kInsufficientFlashsizeError);
+		pthread_exit(NULL);
+
 	}else{
 		
 		OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
@@ -2356,7 +1509,8 @@ int upgrade_from_card(char *path)
 			OTA_INFO("md5_str is fuhe\n");
 		}else{
 			OTA_ERR("md5_str is bufuhe\n");			
-			//execl("/sbin/reboot", "reboot", NULL);			
+			//execl("/sbin/reboot", "reboot", NULL);
+            myconnect(kPayloadMD5MismatchError);
 			return -1;
 
 		}
@@ -2378,6 +1532,8 @@ int upgrade_from_card(char *path)
 		}else{
 			OTA_ERR("SN bufuhe!!!!!!\n");
 			//execl("/sbin/reboot", "reboot", NULL);
+			
+            myconnect(kSNMismatchError);
 			return -1;
 		}
 
@@ -2692,7 +1848,7 @@ int mySetTimeFrom4G() {
 
 int main(int argc, char const *argv[])
 {
-    mySetTimeFrom4G();
+    //mySetTimeFrom4G();
 	//downloadFileFromTianyiYun("iotoos29000240327/ota/3/123/upgrade.img", "/tmp/upgrade.img");
 	//return 0;
     char url[2048] = "127.0.0.1";
@@ -2720,31 +1876,31 @@ int main(int argc, char const *argv[])
 	
 	downloadFileFromTianyiYun("iotoos29000240327/ota/1/upgrade.img", "/tmp/upgrade.img");
 	//return 0;
-	struct statvfs buf2;
-    if (statvfs("/root", &buf2) == 0) {
-        unsigned long block_size = buf2.f_frsize; // 文件系统块大小
-        unsigned long available_blocks = buf2.f_bavail; // 可用块数量
-        unsigned long available_space = block_size * available_blocks;
-        
-        OTA_INFO("可用空间大小：%luk bytes\n", available_space/1024);
-    } else {
-        OTA_INFO("无法获取/root分区信息\n");
-    }
-	struct sysinfo sys_info;
-
-    // 获取系统信息
-    if (sysinfo(&sys_info) != 0) {
-        perror("sysinfo");
-        return 1;
-    }
-
-    // 打印可用内存大小
-    OTA_INFO("Total RAM: %lu KB\n", sys_info.totalram / 1024);
-    OTA_INFO("Free RAM: %lu KB\n", sys_info.freeram / 1024);
-
-    // 打印可用Flash大小
-    OTA_INFO("Total Swap: %lu KB\n", sys_info.totalswap / 1024);
-    OTA_INFO("Free Swap: %lu KB\n", sys_info.freeswap / 1024);
+//	struct statvfs buf2;
+//    if (statvfs("/root", &buf2) == 0) {
+//        unsigned long block_size = buf2.f_frsize; // 文件系统块大小
+//        unsigned long available_blocks = buf2.f_bavail; // 可用块数量
+//        unsigned long available_space = block_size * available_blocks;
+//        
+//        OTA_INFO("可用空间大小：%luk bytes\n", available_space/1024);
+//    } else {
+//        OTA_INFO("无法获取/root分区信息\n");
+//    }
+//	struct sysinfo sys_info;
+//
+//    // 获取系统信息
+//    if (sysinfo(&sys_info) != 0) {
+//        perror("sysinfo");
+//        return 1;
+//    }
+//
+//    // 打印可用内存大小
+//    OTA_INFO("Total RAM: %lu KB\n", sys_info.totalram / 1024);
+//    OTA_INFO("Free RAM: %lu KB\n", sys_info.freeram / 1024);
+//
+//    // 打印可用Flash大小
+//    OTA_INFO("Total Swap: %lu KB\n", sys_info.totalswap / 1024);
+//    OTA_INFO("Free Swap: %lu KB\n", sys_info.freeswap / 1024);
 	
 
 
