@@ -503,7 +503,9 @@ int Compute_file_md5(const char *file_path, char *md5_str)
  
 	return 0;
 }
+//#define CFGINI  "/root/app.ini"
 #define CFGINI  "/root/app.ini"
+
 
 int  GetDevVer(char* ver_out)
 {
@@ -1437,28 +1439,28 @@ int upgrade_from_card(char *path)
 				ota_str[63]='\0';
 				OTA_INFO("!!!ota_str%s\n",ota_str);
 				
-				memcpy(ver_str,ota_str+3,7);
-				OTA_INFO("ver_str is %s\n",ver_str);
-				
-				GetDevVer(tmpVer);
-				OTA_INFO("tmpVer is %s\n",tmpVer);
-				
-				if (compare_versions(tmpVer, ver_str)) {
-					OTA_INFO("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
-
-				} else {
-					if (strcmp(ver_str, "0.0.0.0") == 0){
-						OTA_ERR("版本%s 强制升级\n",ver_str);
-					}else{
-						OTA_ERR("当前版本已是最新\n");
-						free(buf);
-						close(fd);						
-						close(card_fd);
-						OTA_ERR("!!!reboot\n");
-						//execl("/sbin/reboot", "reboot", NULL);
-						return -1;
-					}
-				}
+//				memcpy(ver_str,ota_str+3,7);
+//				OTA_INFO("ver_str is %s\n",ver_str);
+//				
+//				GetDevVer(tmpVer);
+//				OTA_INFO("tmpVer is %s\n",tmpVer);
+//				
+//				if (compare_versions(tmpVer, ver_str)) {
+//					OTA_INFO("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
+//
+//				} else {
+//					if (strcmp(ver_str, "0.0.0.0") == 0){
+//						OTA_ERR("版本%s 强制升级\n",ver_str);
+//					}else{
+//						OTA_ERR("当前版本已是最新\n");
+//						free(buf);
+//						close(fd);						
+//						close(card_fd);
+//						OTA_ERR("!!!reboot\n");
+//						//execl("/sbin/reboot", "reboot", NULL);
+//						return -1;
+//					}
+//				}
 
 				//SetDevVer(ver_str);
 				
