@@ -932,7 +932,7 @@ void * parseAndextract(void * arg)
 		    // 可以根据具体情况采取适当的处理措施
 		}
     }
-	//system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
+	system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
  	free(buf);
 	
 #if 1
@@ -996,9 +996,9 @@ void * parseAndextract(void * arg)
 
 	long flash_space = getAvailableSpace();
 
-	//if (flash_space < totalSize)
+	if (flash_space < totalSize)
 	
-	if (1)
+	//if (1)
 	{
 	
 //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
@@ -1026,7 +1026,7 @@ void * parseAndextract(void * arg)
 	    // 可以根据具体情况采取适当的处理措施
 	}
 
-	//SetDevVer(ver_str);
+	SetDevVer(ver_str);
 	OTA_ERR("!!!reboot\n");
 	//execl("/sbin/reboot", "reboot", NULL);
 	pthread_exit(NULL);
@@ -1405,7 +1405,7 @@ int upgrade_from_card(char *path)
 		char md5_get[32];
 
 		//创建文件描述符
-		int fd = open("upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
+		int fd = open("/tmp/upgrade.tar.lzma", O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
 		if (fd < 0)
 		{
 			OTA_ERR("Create file failed\n");
@@ -1484,12 +1484,14 @@ int upgrade_from_card(char *path)
 			    // 可以根据具体情况采取适当的处理措施
 			}
 		}
+        system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
+        free(buf);
 
 		if (length == size)
 			OTA_INFO("split successful length %d  size%d^_^\n\n",length,size);
 #if 1	
 		int ret;
-		const char *file_upgrade = "upgrade.tar.lzma";
+		const char *file_upgrade = "/tmp/upgrade.tar.lzma";
 		char md5_str[MD5_STR_LEN + 1];
 
 		ret = Compute_file_md5(file_upgrade, md5_str);
@@ -1537,23 +1539,47 @@ int upgrade_from_card(char *path)
 			return -1;
 		}
 
-		system("rm upgrade.tar");
+		system("rm /tmp/upgrade.tar");
 
-		system("lzma -d upgrade.tar.lzma");
-		system("./busybox tar xvf upgrade.tar");
+		system("lzma -d /tmp/upgrade.tar.lzma");
+		//system("./busybox tar xvf /tmpupgrade.tar");
+		system("mkdir /tmp/ota && busybox tar xvf /tmp/upgrade.tar -C /tmp/ota");
 
-		read_ini_node("ota.ini", "file");
+        const char* directory = "/tmp/ota"; // 存放解压文件的目录
 
-		ret = readStringValue("ota", "sv", ver_str, "./ota.ini");
-		if (ret == 1)
-		{
-		    // 读取配置值成功
-		}
-		else
-		{
-		    OTA_ERR("Error reading configuration value\n");
-		    // 可以根据具体情况采取适当的处理措施
-		}
+        size_t totalSize = getTotalFileSize(directory);
+
+        long flash_space = getAvailableSpace();
+
+        if (flash_space < totalSize)
+
+        //if (1)
+        {
+
+        //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
+
+            OTA_ERR("Flash空间不足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+            myconnect(kInsufficientFlashsizeError);
+        	pthread_exit(NULL);
+
+        }else{
+        	
+        	OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+        }
+
+        read_ini_node("/tmp/ota/ota.ini", "file");
+
+
+        ret = readStringValue("ota", "sv", ver_str, "/tmp/ota/ota.ini");
+        if (ret == 1)
+        {
+            // 读取配置值成功
+        }
+        else
+        {
+            OTA_ERR("Error reading configuration value\n");
+            // 可以根据具体情况采取适当的处理措施
+        }
 
 		SetDevVer(ver_str);
 		OTA_INFO("!!!reboot\n");
@@ -1860,21 +1886,36 @@ int main(int argc, char const *argv[])
     if (argc == 1)
     {
         OTA_INFO("Input a valid URL please\n");
+
         //exit(0);
     }
     else{
-		if (strncasecmp((const char*)argv[1], "iotoos", 4) == 0)
+//		if (strncasecmp((const char*)argv[1], "iotoos", 4) == 0)
+//		{
+//			downloadFileFromTianyiYun(argv[1], "/tmp/upgrade.img");
+//            system("cp /tmp/upgrade.img /media/mmcblk0/");
+//		}else{
+//			upgrade_from_card(argv[1]);
+//			OTA_INFO("reboot -- p\n");
+//			system("reboot -- p");
+//			return 0;
+//		}
+        if (strncasecmp((const char*)argv[1], "/media", 4) == 0)
 		{
-			downloadFileFromTianyiYun("iotoos29000240327/ota/1/upgrade.img", "/tmp/upgrade.img");
-		}else{
-			upgrade_from_card(argv[1]);
+            upgrade_from_card(argv[1]);
 			OTA_INFO("reboot -- p\n");
 			system("reboot -- p");
 			return 0;
+
+		}else{
+            system("rm /tmp/upgrade.img");
+            
+			downloadFileFromTianyiYun(argv[1], "/tmp/upgrade.img");
+            system("cp /tmp/upgrade.img /media/mmcblk0/");
+
 		}
 	}
 	
-	downloadFileFromTianyiYun("iotoos29000240327/ota/1/upgrade.img", "/tmp/upgrade.img");
 	//return 0;
 //	struct statvfs buf2;
 //    if (statvfs("/root", &buf2) == 0) {
