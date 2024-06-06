@@ -60,16 +60,23 @@
 #define false   0
 #define true    1
 #define MY_BUF_SIZE 256
-/* 
-#define OTA_DEBUG //开启debug打印
-#ifdef OTA_DEBUG
-#define OTA_INFO(...) fprintf(stdout, "[OTA_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stdout, __VA_ARGS__)
-#define OTA_ERR(...) fprintf(stderr, "[OTA_ERR] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
-#else
-#define OTA_INFO(...)
-#define OTA_ERR(...) 
-#endif
-*/
+
+char timeString[9]; // 用于存储时间的字符串
+
+char *current_time() {
+    time_t current_time;
+    struct tm * time_info;
+//    char timeString[9]; // 用于存储时间的字符串
+
+    time(&current_time);
+    time_info = localtime(&current_time);
+
+    strftime(timeString, sizeof(timeString), "%H:%M:%S", time_info);
+    //printf("当前时间是：%s\n", timeString);
+
+    return timeString;
+}
+
 #define NONE_LEVEL 0
 #define INFO_LEVEL 1
 #define ERR_LEVEL  2
@@ -81,11 +88,11 @@
 #define OTA_INFO(...)
 #define OTA_ERR(...) 
 #elif(LOG_LEVEL == INFO_LEVEL)
-#define OTA_INFO(...) fprintf(stdout, "[OTA_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stdout, __VA_ARGS__)
-#define OTA_ERR(...) fprintf(stderr, "[OTA_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
+#define OTA_INFO(...) fprintf(stdout, "[OTA_INFO:%s] %s(%d): ", current_time(), __FUNCTION__, __LINE__),fprintf(stdout, __VA_ARGS__)
+#define OTA_ERR(...) fprintf(stderr, "[OTA_INFO:%s] %s(%d): ", current_time(), __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
 #elif(LOG_LEVEL == ERR_LEVEL)
 #define OTA_INFO(...) 
-#define OTA_ERR(...) fprintf(stderr, "[OTA_INFO] %s(%d): ", __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
+#define OTA_ERR(...) fprintf(stderr, "[OTA_INFO:%s] %s(%d): ", current_time(), __FUNCTION__, __LINE__),fprintf(stderr, __VA_ARGS__)
 #endif
 #define OTA_DEBUG //开启debug打印
 
@@ -164,6 +171,7 @@ enum  ErrorCode{
   kPayloadMD5MismatchError = 2,  //
   kInsufficientFlashsizeError,  //flash空间不足
   kSNMismatchError, //
+  kFileNotExitInTF,
 };
 #define PORT_NUMBER 443
 #define HOST "application.daguiot.com"
@@ -246,13 +254,13 @@ int myconnect(int data) {
         }
     }
     
-    //printf("MESSAGE %s\n",MESSAGE);
-    char buffer[256];
-    bzero(buffer, 256);
+    //OTA_INFO("MESSAGE %s\n",MESSAGE);
+    char buffer[512];
+    bzero(buffer, 512);
     
 	char MESSAGE[] = "GET /ota/error?version=1.0.0.1&msg=%d HTTP/1.1\r\nHost: application.daguiot.com\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n";
 	sprintf(buffer, MESSAGE, data);
-    printf("buffer %s\n",buffer);
+    OTA_INFO("%s\n",buffer);
     // 发送消息
     int n = wolfSSL_write(ssl, buffer, strlen(buffer));
     if (n < 0) {
@@ -264,10 +272,11 @@ int myconnect(int data) {
     }
 
     // 从服务器接收响应
-    bzero(buffer, 256);
-    while (wolfSSL_read(ssl, buffer, 255) > 0) {
-        printf("%s", buffer);
-        bzero(buffer, 256);
+    bzero(buffer, 512);
+    while (wolfSSL_read(ssl, buffer, 511) > 0) {
+        OTA_INFO("%s", buffer);
+        bzero(buffer, 512);
+        break;
     }
 
     // 发送消息
@@ -934,7 +943,7 @@ void * parseAndextract(void * arg)
 		    // 可以根据具体情况采取适当的处理措施
 		}
     }
-	system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
+	//system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
  	free(buf);
 	
 #if 1
@@ -1486,7 +1495,7 @@ int upgrade_from_card(char *path)
 			    // 可以根据具体情况采取适当的处理措施
 			}
 		}
-        system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
+        //system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
         free(buf);
 
 		if (length == size)
@@ -1591,6 +1600,8 @@ int upgrade_from_card(char *path)
 	}else 
 	{
 		OTA_ERR("!!!file doesn't exist,exit\n");
+        
+        myconnect(kFileNotExitInTF);
 		//exit(0);
 		return -1;
 	}
@@ -1843,7 +1854,8 @@ int getTime() {
 void setTime(time_t nTime) {
     struct tm *t;
     time_t now;
-    if (nTime == 0) {
+    //if (nTime == 0) {
+    if (0) {
         executeCmd("date -s \"2024-01-09 10:26\"");
         time(&now);
         t = localtime(&now);
@@ -1879,6 +1891,7 @@ int main(int argc, char const *argv[])
     //mySetTimeFrom4G();
 	//downloadFileFromTianyiYun("iotoos29000240327/ota/3/123/upgrade.img", "/tmp/upgrade.img");
 	//return 0;
+	//downloadFileFromTianyiYun("ota/1/upgrade.img", "/tmp/ppp.img");
     char url[2048] = "127.0.0.1";
     char domain[64] = {0};
     char ip_addr[16] = {0};
@@ -1913,7 +1926,7 @@ int main(int argc, char const *argv[])
             system("rm /tmp/upgrade.img");
             
 			downloadFileFromTianyiYun(argv[1], "/tmp/upgrade.img");
-            system("cp /tmp/upgrade.img /media/mmcblk0/");
+            //system("cp /tmp/upgrade.img /media/mmcblk0/");
 
 		}
 	}
@@ -1954,7 +1967,7 @@ int main(int argc, char const *argv[])
 
 
 	OTA_INFO("reboot -- p\n");
-	//system("reboot -- p");
+	system("reboot -- p");
 }
 
 int main2(int argc, char const *argv[])
