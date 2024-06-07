@@ -72,7 +72,7 @@ char *current_time() {
     time_info = localtime(&current_time);
 
     strftime(timeString, sizeof(timeString), "%H:%M:%S", time_info);
-    //printf("当前时间是：%s\n", timeString);
+    //OTA_INFO("当前时间是：%s\n", timeString);
 
     return timeString;
 }
@@ -550,6 +550,8 @@ int  SetDevVer(const char* ver_in)
 {
 	writeStringVlaue("ipc", "ver", ver_in, CFGINI);
 }
+
+
 void read_ini_node(const char *filename, const char *node) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -558,7 +560,7 @@ void read_ini_node(const char *filename, const char *node) {
     }
 
     char line[100];
-	char command[100];
+    char command[200];
     char *key, *value;
     int count = 0;
 
@@ -576,12 +578,37 @@ void read_ini_node(const char *filename, const char *node) {
                     OTA_INFO("Key: %s, Value: %s\n", key, value);
                     count++;
 
-					OTA_INFO("!!!file_path%s\n",value);
+                    // Extract directory from value
+                    char directory[100];
+                    char *last_slash = strrchr(value, '/');
+                    if (last_slash != NULL) {
+                        int path_length = last_slash - value;
+                        strncpy(directory, value, path_length);
+                        directory[path_length] = '\0';
 
-					memset(command,0,100);
-					sprintf(command, "cp /tmp/ota/%s %s", key, value);
+                        struct stat sb;
+                        if (stat(directory, &sb) == 0 && S_ISREG(sb.st_mode)) {
+                            // If directory exists as a file, remove it
+                            remove(directory);
+                        }
 
-					system(command);
+                        // Check if directory exists
+                        if (stat(directory, &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+                            // Directory does not exist, create it
+                            sprintf(command, "mkdir -p %s", directory);
+                            system(command);
+                        }
+                        // rm the file
+                        memset(command, 0,200);
+                        sprintf(command, "rm %s", value);
+                        system(command);
+
+                        // Copy the file
+                        sprintf(command, "cp /tmp/ota/%s %s", key, value);
+                        system(command);
+                    } else {
+                        OTA_INFO("Invalid file path: %s\n", value);
+                    }
                 }
             }
             break;
@@ -592,6 +619,7 @@ void read_ini_node(const char *filename, const char *node) {
 
     fclose(file);
 }
+
 
 int compare_versions(char *current_version, char *upgrade_version) {
     if (strcmp(upgrade_version, current_version) > 0) {
@@ -819,6 +847,74 @@ long getAvailableSpace()
     }
     return -1; // 获取失败
 }
+
+// 定义结构体用于存储键值对
+typedef struct {
+    char key[50];
+    char value[100];
+} KeyValue;
+
+// 定义函数用于解析INI文件
+void parseIniFile(const char* filename, KeyValue* keyValueArray, int *count) {
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        OTA_INFO("无法打开文件\n");
+        return;
+    }
+
+    char line[256];
+    *count = 0;
+    while (fgets(line, sizeof(line), file)) {
+        if (line[0] == '[') {
+            if (strstr(line, "ota") != NULL) {
+                continue; // 不处理ota部分的内容
+            }
+        } else {
+            char key[50], value[100];
+            if(sscanf(line, "%[^=]=%s", key, value) == 2) {
+                strcpy(keyValueArray[*count].key, key);
+                strcpy(keyValueArray[*count].value, value);
+                (*count)++;
+            }
+        }
+    }
+    fclose(file);
+}
+
+// 定义函数用于获取文件大小
+long getFileSize(const char* filename) {
+        OTA_INFO("filename%s\n",filename);
+
+    FILE* file = fopen(filename, "rb");
+    if (file == NULL) {
+        OTA_INFO("无法打开文件\n");
+        return -1;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fclose(file);
+    return size;
+}
+
+int getAllUpgradeFilesSize() {
+    KeyValue keyValueArray[100];
+    int count;
+    parseIniFile("/tmp/ota/ota.ini", keyValueArray, &count);
+
+    long totalSize = 0;
+    for (int i = 0; i < count; i++) {
+        long size = getFileSize(keyValueArray[i].value);
+        if (size > 0) {
+            totalSize += size;
+        }
+    }
+
+    OTA_INFO("所有文件的总大小为：%ld 字节\n", totalSize);
+
+    return totalSize;
+}
+
 //void curllink()
 //{
 //    CURL *curl;
@@ -943,7 +1039,7 @@ void * parseAndextract(void * arg)
 		    // 可以根据具体情况采取适当的处理措施
 		}
     }
-	//system("cp /tmp/upgrade.tar.lzma /media/mmcblk0/");
+	system("cp /tmp/upgrade.tar.lzma /media/mmcblk0p1");
  	free(buf);
 	
 #if 1
@@ -1000,21 +1096,25 @@ void * parseAndextract(void * arg)
 	system("lzma -d /tmp/upgrade.tar.lzma");
 	
 	//system("mkdir /tmp/ota");
-	system("mkdir /tmp/ota && ./busybox tar xvf /tmp/upgrade.tar -C /tmp/ota");
+	system("mkdir /tmp/ota; ./busybox tar xvf /tmp/upgrade.tar -C /tmp/ota");
 	const char* directory = "/tmp/ota"; // 存放解压文件的目录
 
     size_t totalSize = getTotalFileSize(directory);
+    size_t totalExitSize = getAllUpgradeFilesSize();
 
 	long flash_space = getAvailableSpace();
 
-	if (flash_space < totalSize)
+    int v = totalSize - totalExitSize;
+        
+	if (v > 0 && flash_space < v)
 	
-	//if (1)
+	//if (0)
 	{
 	
 //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
+    OTA_ERR("Flash空间不足flash_space %ld Totalfilesize:%zu bytes\n",flash_space,totalSize,totalExitSize);
 
-	    OTA_ERR("Flash空间不足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+	    OTA_ERR("Flash空间不足flash_space %ldK Totalfilesize:%zuk bytes totalExitSize:%zuk bytes\n",flash_space/1024,totalSize/1024,totalExitSize/1024);
         myconnect(kInsufficientFlashsizeError);
 		pthread_exit(NULL);
 
@@ -1967,7 +2067,7 @@ int main(int argc, char const *argv[])
 
 
 	OTA_INFO("reboot -- p\n");
-	system("reboot -- p");
+	//system("reboot -- p");
 }
 
 int main2(int argc, char const *argv[])
