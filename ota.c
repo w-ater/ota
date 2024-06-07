@@ -489,6 +489,7 @@ int Compute_file_md5(const char *file_path, char *md5_str)
 		if (-1 == ret)
 		{
 			perror("read");
+            close(fd);
 			return -1;
 		}
  
@@ -512,6 +513,51 @@ int Compute_file_md5(const char *file_path, char *md5_str)
  
 	return 0;
 }
+//#define MD5_DIGEST_LENGTH 16
+//
+//int ComputeFileMD52(const char *file_path, char *md5_str) {
+//    int ret = 0;
+//    int fd;
+//    unsigned char md5_value[MD5_DIGEST_LENGTH];
+//    MD5_CTX md5_ctx;
+//    unsigned char buffer[1024];
+//
+//    fd = open(file_path, O_RDONLY);
+//    if (fd == -1) {
+//        perror("open");
+//        return -1;
+//    }
+//
+//    MD5_Init(&md5_ctx);
+//
+//    while (1) {
+//        ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+//        if (bytes_read == -1) {
+//            perror("read");
+//            ret = -1;
+//            break;
+//        }
+//        if (bytes_read == 0) {
+//            break;
+//        }
+//
+//        MD5_Update(&md5_ctx, buffer, bytes_read);
+//    }
+//
+//    close(fd);
+//
+//    if (ret != -1) {
+//        MD5_Final(md5_value, &md5_ctx);
+//
+//        for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+//            sprintf(&md5_str[i*2], "%02x", (unsigned int)md5_value[i]);
+//        }
+//        md5_str[MD5_DIGEST_LENGTH * 2] = '\0'; //add null terminator
+//    }
+//
+//    return ret;
+//}
+
 //#define CFGINI  "/root/app.ini"
 #define CFGINI  "/root/app.ini"
 
@@ -546,13 +592,124 @@ int  GetOtaApp(char* ver_out)
 	}
 }
 
-int  SetDevVer(const char* ver_in)
-{
-	writeStringVlaue("ipc", "ver", ver_in, CFGINI);
+//int  SetDevVer(const char* ver_in)
+//{
+//	writeStringVlaue("ipc", "ver", ver_in, CFGINI);
+//}
+
+int SetDevVer(const char* ver_in) {
+    if (ver_in == NULL) {
+        printf("Error: ver_in is NULL\n");
+        return -1;
+    }
+    // 检查section、key是否正确初始化
+    const char* section = "ipc";
+    const char* key = "ver";
+    if (section == NULL || key == NULL) {
+        printf("Error: section or key is NULL\n");
+        return -1;
+    }
+    // 调用SetDevVer函数
+    writeStringVlaue(section, key, ver_in, CFGINI);
 }
 
-
 void read_ini_node(const char *filename, const char *node) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        OTA_INFO("Error opening file %s\n", filename);
+        return;
+    }
+
+    char line[100];
+    char command[200];
+    char *key, *value;
+    int count = 0;
+
+    while (fgets(line, sizeof(line), file)) {
+        if (strstr(line, node) != NULL) {
+            while (fgets(line, sizeof(line), file)) {
+                if (line[0] == '[') {
+                    break;
+                }
+
+                key = strtok(line, "=");
+                value = strtok(NULL, "=");
+
+                if (key != NULL && value != NULL) {
+                    OTA_INFO("Key: %s, Value: %s\n", key, value);
+                    count++;
+
+                    // Extract directory from value
+                    char directory[100];
+                    char *last_slash = strrchr(value, '/');
+                    if (last_slash != NULL) {
+                        int path_length = last_slash - value;
+                        strncpy(directory, value, path_length);
+                        directory[path_length] = '\0';
+
+                        struct stat sb;
+                        if (stat(directory, &sb) == 0 && S_ISREG(sb.st_mode)) {
+                            // If directory exists as a file, remove it
+                            if (remove(directory) != 0) {
+                                OTA_INFO("Error removing file %s\n", directory);
+                            }
+                        }
+
+                        // Check if directory exists
+//                        if (stat(directory, &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+//                            // Directory does not exist, create it
+//                            sprintf(command, "mkdir -p %s", directory);
+//                            if (system(command) != 0) {
+//                                OTA_INFO("Error creating directory %s\n", directory);
+//                            }else
+//                                
+//                                OTA_INFO("Succe creating directory %s\n", directory);
+//                        }
+                        // Check if directory exists before creating
+                        if (stat(directory, &sb) != 0 || !S_ISDIR(sb.st_mode)) {
+                            // Directory does not exist, try creating directory
+                            if (mkdir(directory, 0777) != 0) {
+                                OTA_INFO("Error creating directory %s\n", directory);
+                                //continue; // Skip further operations and continue with the next key-value pair
+                            }
+                        }
+
+
+
+                        // Remove the file if it exists
+                        if (access(value, F_OK) != -1) {
+                            if (remove(value) != 0) {
+                                OTA_INFO("Error removing file %s\n", value);
+                                //continue; // Skip further operations and continue with the next key-value pair
+                            }else
+                        
+                                OTA_INFO("Succe removing file %s\n", value);
+                        }
+
+                        // Copy the file
+                        sprintf(command, "cp /tmp/ota/%s %s", key, value);
+                        if (system(command) != 0) {
+                            OTA_INFO("Error copying file %s to %s\n", key, value);
+                        }else
+                        
+                            OTA_INFO("Succe copying file %s to %s\n", key, value);
+                    } else {
+                        OTA_INFO("Invalid file path: %s\n", value);
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    OTA_INFO("Total number of key-value pairs in node %s: %d\n", node, count);
+
+    fclose(file);
+    
+    OTA_INFO("fclose succe\n");
+}
+
+void read_ini_node2(const char *filename, const char *node) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
         OTA_INFO("Error opening file\n");
@@ -783,10 +940,10 @@ void * download(void * socket_d)
 	read_ini_node("/tmp/ota.ini", "file");
 
 	
-	ret = readStringValue("ota", "sv", ver_str, "/tmp/ota.ini");
+	ret = readStringValue("ota", "sv", ver_str, "/tmp/ota/ota.ini");
 	if (ret == 1)
 	{
-	    // 读取配置值成功
+	    OTA_ERR("Succe reading configuration value\n");
 	}
 	else
 	{
@@ -858,7 +1015,7 @@ typedef struct {
 void parseIniFile(const char* filename, KeyValue* keyValueArray, int *count) {
     FILE* file = fopen(filename, "r");
     if (file == NULL) {
-        OTA_INFO("无法打开文件\n");
+        OTA_INFO("can't open %s\n",filename);
         return;
     }
 
@@ -887,7 +1044,7 @@ long getFileSize(const char* filename) {
 
     FILE* file = fopen(filename, "rb");
     if (file == NULL) {
-        OTA_INFO("无法打开文件\n");
+        OTA_INFO("can't open %s\n",filename);
         return -1;
     }
 
@@ -910,7 +1067,7 @@ int getAllUpgradeFilesSize() {
         }
     }
 
-    OTA_INFO("所有文件的总大小为：%ld 字节\n", totalSize);
+    OTA_INFO("totalSize:%ld \n", totalSize);
 
     return totalSize;
 }
@@ -986,13 +1143,13 @@ void * parseAndextract(void * arg)
 		OTA_INFO("tmpVer is %s\n",tmpVer);
 		
 		if (compare_versions(tmpVer, ver_str)) {
-			OTA_INFO("需要升级从 %s到版本 %s\n", tmpVer, ver_str);
+			OTA_INFO("need upgrade from %s to %s\n", tmpVer, ver_str);
 
 		} else {
 			if (strcmp(ver_str, "0.0.0.0") == 0){
-				OTA_ERR("版本%s 强制升级\n",ver_str);
+				OTA_ERR("ver%s force\n",ver_str);
 			}else{
-				OTA_ERR("当前版本已是最新\n");
+				OTA_ERR("already latest\n");
 				free(buf);
 				close(ota_fd);
 				OTA_INFO("!!!reboot\n");
@@ -1006,7 +1163,7 @@ void * parseAndextract(void * arg)
 		memset(md5_get, 0, sizeof(md5_get));
 		memcpy(md5_get,ota_str+10,32);
 
-		OTA_INFO("%s\n \n", md5_get);			
+		OTA_INFO("packet head md5_get:%s\n \n", md5_get);			
 
         //write(fd, buf, len);
         //progressBar(length, resp.content_length);
@@ -1039,7 +1196,7 @@ void * parseAndextract(void * arg)
 		    // 可以根据具体情况采取适当的处理措施
 		}
     }
-	system("cp /tmp/upgrade.tar.lzma /media/mmcblk0p1");
+	//system("cp /tmp/upgrade.tar.lzma /media/mmcblk0p1");
  	free(buf);
 	
 #if 1
@@ -1070,7 +1227,7 @@ void * parseAndextract(void * arg)
 	}
 	
 	char SnOut[64]={0,0,0,0};
-	ret = readStringValue("ipc", "sn", SnOut, "/root/app.ini");
+	ret = readStringValue("ipc", "sn", SnOut, "/tmp/app.ini");
 	if (ret == 1)
 	{
 	    // 读取配置值成功
@@ -1080,6 +1237,7 @@ void * parseAndextract(void * arg)
 	    OTA_ERR("Error reading configuration value\n");
 	    // 可以根据具体情况采取适当的处理措施
 	}
+    
 	OTA_INFO("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
 	if(SnOut[3] == ota_str[42]&&SnOut[4] == ota_str[43]){
 		OTA_INFO("SN fuhe!!!!!!\n");
@@ -1096,7 +1254,9 @@ void * parseAndextract(void * arg)
 	system("lzma -d /tmp/upgrade.tar.lzma");
 	
 	//system("mkdir /tmp/ota");
-	system("mkdir /tmp/ota; ./busybox tar xvf /tmp/upgrade.tar -C /tmp/ota");
+	
+	//system("busybox tar xvf /tmp/upgrade.tar -C /tmp/ota");
+	system("mkdir /tmp/ota; busybox tar xvf /tmp/upgrade.tar -C /tmp/ota");
 	const char* directory = "/tmp/ota"; // 存放解压文件的目录
 
     size_t totalSize = getTotalFileSize(directory);
@@ -1112,15 +1272,15 @@ void * parseAndextract(void * arg)
 	{
 	
 //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
-    OTA_ERR("Flash空间不足flash_space %ld Totalfilesize:%zu bytes\n",flash_space,totalSize,totalExitSize);
+    OTA_ERR("Flash not enough:flash_space %ld Totalfilesize:%zu bytes\n",flash_space,totalSize,totalExitSize);
 
-	    OTA_ERR("Flash空间不足flash_space %ldK Totalfilesize:%zuk bytes totalExitSize:%zuk bytes\n",flash_space/1024,totalSize/1024,totalExitSize/1024);
+	    OTA_ERR("Flash not enough:flash_space %ldK Totalfilesize:%zuk bytes totalExitSize:%zuk bytes\n",flash_space/1024,totalSize/1024,totalExitSize/1024);
         myconnect(kInsufficientFlashsizeError);
 		pthread_exit(NULL);
 
 	}else{
 		
-		OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+		OTA_ERR("Flash is enough:flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
 	}
 	
 	read_ini_node("/tmp/ota/ota.ini", "file");
@@ -1129,7 +1289,7 @@ void * parseAndextract(void * arg)
 	ret = readStringValue("ota", "sv", ver_str, "/tmp/ota/ota.ini");
 	if (ret == 1)
 	{
-	    // 读取配置值成功
+	    OTA_ERR("Succe reading configuration value\n");
 	}
 	else
 	{
@@ -1587,7 +1747,7 @@ int upgrade_from_card(char *path)
 			{
 				write(fd, buf, len);
 				length += len;
-				progressBar(length, size);
+				//progressBar(length, size);
 			}
 			else
 			{
@@ -1629,16 +1789,29 @@ int upgrade_from_card(char *path)
 		}
 
 		char SnOut[64]={0,0,0,0};
-		ret = readStringValue("ipc", "sn", SnOut, "/root/app.ini");
-		if (ret == 1)
-		{
-		    // 读取配置值成功
-		}
-		else
-		{
-		    OTA_ERR("Error reading configuration value\n");
-		    // 可以根据具体情况采取适当的处理措施
-		}
+        //if (access("/root/app.ini", F_OK) != -1) {
+//    		ret = readStringValue("ipc", "sn", SnOut, "/root/app.ini");
+//    		if (ret == 1)
+//    		{
+//    		    // 读取配置值成功
+//    		}
+//    		else
+//    		{
+//    		    OTA_ERR("Error reading configuration value\n");
+//    		    // 可以根据具体情况采取适当的处理措施
+//    		}
+//        }else{
+    		ret = readStringValue("ipc", "sn", SnOut, "/tmp/app.ini");
+    		if (ret == 1)
+    		{
+    		    // 读取配置值成功
+    		}
+    		else
+    		{
+    		    OTA_ERR("Error reading configuration value\n");
+    		    // 可以根据具体情况采取适当的处理措施
+    		}
+        //}
 		OTA_INFO("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
 		if(SnOut[3] == ota_str[42]&&SnOut[4] == ota_str[43]){
 			OTA_INFO("SN fuhe!!!!!!\n");
@@ -1657,26 +1830,31 @@ int upgrade_from_card(char *path)
 		system("mkdir /tmp/ota && busybox tar xvf /tmp/upgrade.tar -C /tmp/ota");
 
         const char* directory = "/tmp/ota"; // 存放解压文件的目录
-
+    
         size_t totalSize = getTotalFileSize(directory);
-
+        size_t totalExitSize = getAllUpgradeFilesSize();
+    
         long flash_space = getAvailableSpace();
-
-        if (flash_space < totalSize)
-
-        //if (1)
+    
+        int v = totalSize - totalExitSize;
+            
+        if (v > 0 && flash_space < v)
+        
+        //if (0)
         {
-
-        //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
-
-            OTA_ERR("Flash空间不足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+        
+    //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
+        OTA_ERR("Flash空间不足flash_space %ld Totalfilesize:%zu bytes\n",flash_space,totalSize,totalExitSize);
+    
+            OTA_ERR("Flash空间不足flash_space %ldK Totalfilesize:%zuk bytes totalExitSize:%zuk bytes\n",flash_space/1024,totalSize/1024,totalExitSize/1024);
             myconnect(kInsufficientFlashsizeError);
-        	pthread_exit(NULL);
-
+            pthread_exit(NULL);
+    
         }else{
-        	
-        	OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+            
+            OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
         }
+
 
         read_ini_node("/tmp/ota/ota.ini", "file");
 
@@ -2018,6 +2196,11 @@ int main(int argc, char const *argv[])
         if (strncasecmp((const char*)argv[1], "/media", 4) == 0)
 		{
             upgrade_from_card(argv[1]);
+            if (mkdir("/root/otaflag", 0777) != 0) {
+                OTA_INFO("Error creating otaflag\n");
+                //continue; // Skip further operations and continue with the next key-value pair
+            }
+            
 			OTA_INFO("reboot -- p\n");
 			system("reboot -- p");
 			return 0;
@@ -2064,10 +2247,17 @@ int main(int argc, char const *argv[])
     pthread_t parse_thread;
     pthread_create(&parse_thread, NULL, parseAndextract, (void *) 0);
     pthread_join(parse_thread, NULL);
-
+    
+    if (mkdir("/root/otaflag", 0777) != 0) {
+        OTA_INFO("Error creating otaflag\n");
+        //continue; // Skip further operations and continue with the next key-value pair
+    }
 
 	OTA_INFO("reboot -- p\n");
-	//system("reboot -- p");
+    if(access("/root/otareb", F_OK ) == -1 ) 
+	{
+    	system("reboot -- p");
+    }
 }
 
 int main2(int argc, char const *argv[])
