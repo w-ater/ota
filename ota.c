@@ -1250,6 +1250,10 @@ void * parseAndextract(void * arg)
 	}
 	
 	system("rm /tmp/upgrade.tar");
+    
+	system("sync");
+
+	system("echo 3 > /proc/sys/vm/drop_caches");
 
 	system("lzma -d /tmp/upgrade.tar.lzma");
 	
@@ -1289,7 +1293,7 @@ void * parseAndextract(void * arg)
 	ret = readStringValue("ota", "sv", ver_str, "/tmp/ota/ota.ini");
 	if (ret == 1)
 	{
-	    OTA_ERR("Succe reading configuration value\n");
+	    OTA_ERR("Succe reading configuration value%s\n",ver_str);
 	}
 	else
 	{
@@ -1788,7 +1792,7 @@ int upgrade_from_card(char *path)
 
 		}
 
-		char SnOut[64]={0,0,0,0};
+		//char SnOut[64]={0,0,0,0};
         //if (access("/root/app.ini", F_OK) != -1) {
 //    		ret = readStringValue("ipc", "sn", SnOut, "/root/app.ini");
 //    		if (ret == 1)
@@ -1801,27 +1805,27 @@ int upgrade_from_card(char *path)
 //    		    // 可以根据具体情况采取适当的处理措施
 //    		}
 //        }else{
-    		ret = readStringValue("ipc", "sn", SnOut, "/tmp/app.ini");
-    		if (ret == 1)
-    		{
-    		    // 读取配置值成功
-    		}
-    		else
-    		{
-    		    OTA_ERR("Error reading configuration value\n");
-    		    // 可以根据具体情况采取适当的处理措施
-    		}
-        //}
-		OTA_INFO("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
-		if(SnOut[3] == ota_str[42]&&SnOut[4] == ota_str[43]){
-			OTA_INFO("SN fuhe!!!!!!\n");
-		}else{
-			OTA_ERR("SN bufuhe!!!!!!\n");
-			//execl("/sbin/reboot", "reboot", NULL);
-			
-            myconnect(kSNMismatchError);
-			return -1;
-		}
+//    		ret = readStringValue("ipc", "sn", SnOut, "/tmp/app.ini");
+//    		if (ret == 1)
+//    		{
+//    		    // 读取配置值成功
+//    		}
+//    		else
+//    		{
+//    		    OTA_ERR("Error reading configuration value\n");
+//    		    // 可以根据具体情况采取适当的处理措施
+//    		}
+//        //}
+//		OTA_INFO("%c %c %c %c\n",SnOut[3] , ota_str[42],SnOut[4] , ota_str[43]);
+//		if(SnOut[3] == ota_str[42]&&SnOut[4] == ota_str[43]){
+//			OTA_INFO("SN fuhe!!!!!!\n");
+//		}else{
+//			OTA_ERR("SN bufuhe!!!!!!\n");
+//			//execl("/sbin/reboot", "reboot", NULL);
+//			
+//            myconnect(kSNMismatchError);
+//			return -1;
+//		}
 
 		system("rm /tmp/upgrade.tar");
 
@@ -2163,6 +2167,7 @@ int mySetTimeFrom4G() {
 
 //date -s "2024-05-08 06:34"
 //1.0.0.1876B885EA47289377C60E97B9C73EE6222
+#define VERSION "1.0.0"
 
 int main(int argc, char const *argv[])
 {
@@ -2170,17 +2175,23 @@ int main(int argc, char const *argv[])
 	//downloadFileFromTianyiYun("iotoos29000240327/ota/3/123/upgrade.img", "/tmp/upgrade.img");
 	//return 0;
 	//downloadFileFromTianyiYun("ota/1/upgrade.img", "/tmp/ppp.img");
+	//sleep(10);
     char url[2048] = "127.0.0.1";
     char domain[64] = {0};
     char ip_addr[16] = {0};
     int port = 80;
     char file_name[256] = {0};
- 
-    if (argc == 1)
+    
+    if (argc > 1 && strcmp(argv[1], "-v") == 0) {
+        OTA_INFO("current version:%s\n", VERSION);
+        return 0;
+    }
+    
+    if (argc != 2)
     {
         OTA_INFO("Input a valid URL please\n");
 
-        //exit(0);
+        exit(0);
     }
     else{
 //		if (strncasecmp((const char*)argv[1], "iotoos", 4) == 0)
@@ -2201,8 +2212,11 @@ int main(int argc, char const *argv[])
                 //continue; // Skip further operations and continue with the next key-value pair
             }
             
-			OTA_INFO("reboot -- p\n");
-			system("reboot -- p");
+            OTA_INFO("reboot -- p\n");
+            if(access("/root/otareb", F_OK ) == -1 ) 
+            {
+                system("reboot -- p");
+            }
 			return 0;
 
 		}else{
@@ -2243,7 +2257,7 @@ int main(int argc, char const *argv[])
 	
 
 
-    /*开新的线程下载文件*/
+    /*开新的线程解析文件*/
     pthread_t parse_thread;
     pthread_create(&parse_thread, NULL, parseAndextract, (void *) 0);
     pthread_join(parse_thread, NULL);
