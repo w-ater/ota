@@ -172,6 +172,7 @@ enum  ErrorCode{
   kInsufficientFlashsizeError,  //flash空间不足
   kSNMismatchError, //
   kFileNotExitInTF,
+  kVerReadError //
 };
 #define PORT_NUMBER 443
 #define HOST "application.daguiot.com"
@@ -193,14 +194,14 @@ int myconnect(int data) {
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
         perror("Error opening socket");
-        exit(1);
+        return -1;
     }
 
     // 获取服务器地址
     server = gethostbyname(HOST);
     if (server == NULL) {
         fprintf(stderr, "Error, no such host\n");
-        exit(1);
+        return -1;
     }
 
     // 设置服务器地址结构
@@ -212,7 +213,7 @@ int myconnect(int data) {
     // 连接到服务器
     if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
         perror("Error connecting");
-        exit(1);
+        return -1;
     }
 
     // 创建wolfSSL上下文
@@ -220,7 +221,7 @@ int myconnect(int data) {
     if (ctx == NULL) {
         fprintf(stderr, "wolfSSL_CTX_new error.\n");
         close(sockfd);
-        exit(1);
+        return -1;
     }
     wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, 0);//fix SSL_connect fail
 
@@ -230,7 +231,7 @@ int myconnect(int data) {
         fprintf(stderr, "wolfSSL_new error.\n");
         wolfSSL_CTX_free(ctx);
         close(sockfd);
-        exit(1);
+        return -1;
     }
 
     // 将wolfSSL对象与套接字关联
@@ -250,7 +251,7 @@ int myconnect(int data) {
             wolfSSL_free(ssl);
             wolfSSL_CTX_free(ctx);
             close(sockfd);
-            exit(1);
+            return -1;
         }
     }
     
@@ -268,7 +269,7 @@ int myconnect(int data) {
         wolfSSL_free(ssl);
         wolfSSL_CTX_free(ctx);
         close(sockfd);
-        exit(1);
+        return -1;
     }
 
     // 从服务器接收响应
@@ -573,6 +574,7 @@ int  GetDevVer(char* ver_out)
 	{
 	    OTA_ERR("Error reading configuration value\n");
 	    // 可以根据具体情况采取适当的处理措施
+	    return -1;
 	}
 }
 //#define CFGINI2  "/media/mmcblk0/ota"
@@ -1012,7 +1014,7 @@ typedef struct {
 } KeyValue;
 
 // 定义函数用于解析INI文件
-void parseIniFile(const char* filename, KeyValue* keyValueArray, int *count) {
+void parseIniFile2(const char* filename, KeyValue* keyValueArray, int *count) {
     FILE* file = fopen(filename, "r");
     if (file == NULL) {
         OTA_INFO("can't open %s\n",filename);
@@ -1032,6 +1034,41 @@ void parseIniFile(const char* filename, KeyValue* keyValueArray, int *count) {
                 strcpy(keyValueArray[*count].key, key);
                 strcpy(keyValueArray[*count].value, value);
                 (*count)++;
+            }
+        }
+    }
+    fclose(file);
+}
+void parseIniFile(const char* filename, KeyValue* keyValueArray, int *count) {
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        printf("can't open %s\n", filename);
+        return;
+    }
+
+    char line[256];
+    *count = 0;
+    bool skipSection = false;
+
+    while (fgets(line, sizeof(line), file)) {
+        // 去除行末的换行符
+        line[strcspn(line, "\n")] = 0;
+
+        if (line[0] == '[') {
+            // 检查是否是 [ota] 部分
+            if (strstr(line, "[ota]") != NULL) {
+                skipSection = true;
+            } else {
+                skipSection = false;
+            }
+        } else if (!skipSection) {
+            char key[50], value[100];
+            if (sscanf(line, "%[^=]=%s", key, value) == 2) {
+                strcpy(keyValueArray[*count].key, key);
+                strcpy(keyValueArray[*count].value, value);
+                (*count)++;
+            } else {
+                printf("Failed to parse line: %s\n", line);
             }
         }
     }
@@ -1139,7 +1176,9 @@ void * parseAndextract(void * arg)
 		memcpy(ver_str,ota_str+3,7);
 		OTA_INFO("ver_str is %s\n",ver_str);
 		
-		GetDevVer(tmpVer);
+		
+        if(GetDevVer(tmpVer)<0)
+            myconnect(kVerReadError);
 		OTA_INFO("tmpVer is %s\n",tmpVer);
 		
 		if (compare_versions(tmpVer, ver_str)) {
@@ -1276,7 +1315,7 @@ void * parseAndextract(void * arg)
 	{
 	
 //https://application.daguiot.com/ota/error?version=1.0.0.1&msg=""
-    OTA_ERR("Flash not enough:flash_space %ld Totalfilesize:%zu bytes\n",flash_space,totalSize,totalExitSize);
+    OTA_ERR("Flash not enough:flash_space %ld Totalfilesize:%zu bytes Totalexitfilesize:%zu bytes\n",flash_space,totalSize,totalExitSize);
 
 	    OTA_ERR("Flash not enough:flash_space %ldK Totalfilesize:%zuk bytes totalExitSize:%zuk bytes\n",flash_space/1024,totalSize/1024,totalExitSize/1024);
         myconnect(kInsufficientFlashsizeError);
@@ -1284,7 +1323,7 @@ void * parseAndextract(void * arg)
 
 	}else{
 		
-		OTA_ERR("Flash is enough:flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+        OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes totalExitSize:%zuk bytes\n",flash_space/1024,totalSize/1024,totalExitSize/1024);
 	}
 	
 	read_ini_node("/tmp/ota/ota.ini", "file");
@@ -1856,7 +1895,7 @@ int upgrade_from_card(char *path)
     
         }else{
             
-            OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes\n",flash_space/1024,totalSize/1024);
+            OTA_ERR("Flash空间充足flash_space %ldK Totalfilesize:%zuk bytes totalExitSize:%zuk bytes\n",flash_space/1024,totalSize/1024,totalExitSize/1024);
         }
 
 
@@ -1866,7 +1905,7 @@ int upgrade_from_card(char *path)
         ret = readStringValue("ota", "sv", ver_str, "/tmp/ota/ota.ini");
         if (ret == 1)
         {
-            // 读取配置值成功
+            OTA_ERR("Succe reading configuration value %s %d\n",ver_str,sizeof(ver_str));
         }
         else
         {
@@ -1874,10 +1913,11 @@ int upgrade_from_card(char *path)
             // 可以根据具体情况采取适当的处理措施
         }
 
+
 		SetDevVer(ver_str);
 		OTA_INFO("!!!reboot\n");
 		//execl("/sbin/reboot", "reboot", NULL);
-		return -1;
+		return 0;
 #endif
 	}else 
 	{
@@ -1887,7 +1927,7 @@ int upgrade_from_card(char *path)
 		//exit(0);
 		return -1;
 	}
-
+    
 }
 
 int KillProcessByName(char *processName) 
@@ -2263,7 +2303,7 @@ int main(int argc, char const *argv[])
     pthread_join(parse_thread, NULL);
     
     if (mkdir("/root/otaflag", 0777) != 0) {
-        OTA_INFO("Error creating otaflag\n");
+        OTA_INFO("Error creating otaflag,maybe exit\n");
         //continue; // Skip further operations and continue with the next key-value pair
     }
 
